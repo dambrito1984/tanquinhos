@@ -53,7 +53,13 @@
   .bigbtn { padding:14px 30px; font-size:18px; background:linear-gradient(180deg,#ffd23e,#ffb52e); color:#402; box-shadow:0 4px 0 #b57e00; }
   .bigbtn:active { transform:translateY(3px); box-shadow:0 1px 0 #b57e00; }
   .hidden { display:none !important; }
+  #joinrow { display:flex; gap:8px; align-items:center; }
+  #codein { width:130px; padding:12px; font-size:20px; text-align:center; border-radius:10px; border:none;
+            text-transform:uppercase; font-weight:800; letter-spacing:3px; }
+  #netstatus { min-height:24px; font-size:15px; color:#ffd23e; font-weight:600; max-width:400px; }
+  .backbtn { background:#33415c; color:#fff; padding:10px 22px; font-size:14px; }
 </style>
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
 <div id="wrap"><div id="stage">
@@ -88,6 +94,19 @@
        O terreno é destruído de verdade — cuidado para não ficar preso na cratera! 🕳️</p>
     <button class="btn bigbtn" id="btn1p">🤖 1 Jogador (vs CPU)</button>
     <button class="btn bigbtn" id="btn2p">👥 2 Jogadores</button>
+    <button class="btn bigbtn" id="btnonline">🌐 Jogar online</button>
+  </div>
+
+  <div class="overlay hidden" id="onlinemenu">
+    <h1>🌐 Jogar online</h1>
+    <p>Cada um no seu aparelho! Um <b>cria a sala</b> e fala o código;<br>o outro <b>digita o código</b> para entrar.</p>
+    <button class="btn bigbtn" id="btncreate">🏠 Criar sala</button>
+    <div id="joinrow">
+      <input id="codein" maxlength="4" placeholder="CÓDIGO" autocomplete="off" autocapitalize="characters">
+      <button class="btn bigbtn" id="btnjoin">Entrar</button>
+    </div>
+    <div id="netstatus"></div>
+    <button class="btn backbtn" id="btnback">← Voltar</button>
   </div>
 
   <div class="overlay hidden" id="gameover">
@@ -135,9 +154,21 @@ let drag = null;         // {sx,sy,cx,cy} arrasto de mira
 let moveDir = 0;         // -1,0,1 (botões seguros)
 let msgTimer = null;
 let cpuTimeout = null;
+// online
+let online = false, isHost = false, myIndex = 0, peer = null, conn = null;
+let lastShooter = 0, pendingSync = null, nextWindOverride = null, lastMoveSent = 0;
 
 const clamp = (v,a,b) => v<a?a:(v>b?b:v);
-const rand = (a,b) => a + Math.random()*(b-a);
+let rng = Math.random; // trocado por PRNG com semente no modo online (terreno igual nos 2 lados)
+function mulberry32(a){
+  return function(){
+    a|=0; a = a+0x6D2B79F5|0;
+    let t = Math.imul(a^a>>>15, 1|a);
+    t = t+Math.imul(t^t>>>7, 61|t)^t;
+    return ((t^t>>>14)>>>0)/4294967296;
+  };
+}
+const rand = (a,b) => a + rng()*(b-a);
 const randn = () => (Math.random()+Math.random()+Math.random()-1.5); // ~normal
 
 // ============ TERRENO ============
@@ -212,6 +243,10 @@ function tryMove(t, dir){
   t.x = nx; t.y = groundAt(nx);
   t.fuel -= 1;
   updateFuel();
+  if(online && Date.now() - lastMoveSent > 80){
+    lastMoveSent = Date.now();
+    sendMsg({ type:"move", x:t.x });
+  }
 }
 
 // ============ PROJÉTEIS ============
@@ -231,7 +266,13 @@ function stepProj(p){
   }
   return {};
 }
+function fireLocal(){
+  const t = tanks[cur];
+  if(online) sendMsg({ type:"shot", x:t.x, ang:t.aim.ang, pow:t.aim.pow, weapon:t.weapon });
+  fire(t);
+}
 function fire(t){
+  lastShooter = tanks.indexOf(t);
   const w = t.weapon;
   if(w !== "normal"){
     if(t.ammo[w] <= 0) return;
@@ -274,19 +315,26 @@ function explode(x, y, wkey, owner){
 }
 
 // ============ TURNOS ============
-function newWind(){
-  wind = rand(-0.035, 0.035);
-  const v = Math.round(Math.abs(wind)*300);
-  document.getElementById("windval").textContent = (wind<0?"← ":"→ ") + v;
+function setWind(v){
+  wind = v;
+  const n = Math.round(Math.abs(wind)*300);
+  document.getElementById("windval").textContent = (wind<0?"← ":"→ ") + n;
 }
+function newWind(){ setWind(rand(-0.035, 0.035)); }
+function canAct(){ return state === "AIM" && !tanks[cur].isCPU && (!online || cur === myIndex); }
 function startTurn(){
   const t = tanks[cur];
   t.fuel = FUEL_MAX; t.weapon = "normal";
   state = "AIM";
-  newWind(); updateFuel(); updateWeaponsUI();
+  if(online){
+    if(nextWindOverride !== null){ setWind(nextWindOverride); nextWindOverride = null; }
+  } else newWind();
+  updateFuel(); updateWeaponsUI();
   if(t.isCPU){
     toast("🤖 CPU pensando...", 1200);
     cpuTimeout = setTimeout(cpuPlay, rand(1000,1700));
+  } else if(online){
+    toast(cur === myIndex ? "🟢 Sua vez!" : "⏳ Vez do adversário...", 1300);
   } else {
     toast(cur===0 ? "🔵 Sua vez!" : "🔴 Vez do Vermelho!", 1100);
   }
@@ -389,7 +437,7 @@ function updateWeaponsUI(){
   document.querySelectorAll(".wbtn").forEach(b=>{
     const w = b.dataset.w;
     b.classList.toggle("sel", t.weapon === w);
-    b.disabled = (w!=="normal" && t.ammo[w]<=0) || t.isCPU || state!=="AIM";
+    b.disabled = (w!=="normal" && t.ammo[w]<=0) || t.isCPU || state!=="AIM" || (online && cur!==myIndex);
   });
 }
 
@@ -565,7 +613,7 @@ function drawAim(){
 function tick(){
   // física
   for(const t of tanks) tankPhysics(t);
-  if(state === "AIM" && moveDir !== 0 && !tanks[cur].isCPU) tryMove(tanks[cur], moveDir);
+  if(moveDir !== 0 && canAct()) tryMove(tanks[cur], moveDir);
   if(state === "FLY"){
     for(let i=projectiles.length-1; i>=0; i--){
       const p = projectiles[i];
@@ -577,7 +625,12 @@ function tick(){
   }
   if(state === "WAIT"){
     const settling = tanks.some(t => t.alive && t.fallFrom !== null);
-    if(!settling && --waitTimer <= 0) endTurn();
+    if(!settling && --waitTimer <= 0){
+      if(!online) endTurn();
+      else if(lastShooter === myIndex){ sendSync(); endTurn(); }        // quem atirou manda o estado oficial
+      else if(pendingSync){ applySync(pendingSync); pendingSync = null; endTurn(); }
+      else state = "SYNC";                                              // espera o estado do atirador chegar
+    }
   }
   for(let i=particles.length-1;i>=0;i--){
     const pt = particles[i];
@@ -600,7 +653,7 @@ function canvasPos(e){
 }
 cv.addEventListener("pointerdown", e => {
   audio();
-  if(state !== "AIM" || tanks[cur].isCPU) return;
+  if(!canAct()) return;
   const p = canvasPos(e);
   drag = { sx:p.x, sy:p.y, cx:p.x, cy:p.y };
   cv.setPointerCapture(e.pointerId);
@@ -622,7 +675,7 @@ cv.addEventListener("pointerup", e => {
   const dx = drag.sx - drag.cx, dy = drag.sy - drag.cy;
   const d = Math.hypot(dx,dy);
   drag = null;
-  if(d > 22 && state === "AIM" && !tanks[cur].isCPU) fire(tanks[cur]);
+  if(d > 22 && canAct()) fireLocal();
 });
 cv.addEventListener("pointercancel", () => { drag = null; });
 
@@ -633,7 +686,7 @@ for(const [id,dir] of [["btnL",-1],["btnR",1]]){
   b.addEventListener("pointerleave",() => { moveDir = 0; });
 }
 window.addEventListener("keydown", e => {
-  if(state !== "AIM" || tanks[cur].isCPU) return;
+  if(!canAct()) return;
   if(e.key === "ArrowLeft") moveDir = -1;
   if(e.key === "ArrowRight") moveDir = 1;
 });
@@ -644,7 +697,7 @@ window.addEventListener("keyup", e => {
 document.querySelectorAll(".wbtn").forEach(b => {
   b.addEventListener("click", () => {
     const t = tanks[cur];
-    if(state !== "AIM" || t.isCPU) return;
+    if(!canAct()) return;
     const w = b.dataset.w;
     if(w !== "normal" && t.ammo[w] <= 0) return;
     t.weapon = w;
@@ -652,9 +705,144 @@ document.querySelectorAll(".wbtn").forEach(b => {
   });
 });
 
+// ============ ONLINE (WebRTC via PeerJS) ============
+const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // sem 0/O/1/I para não confundir
+function makeCode(){ let c=""; for(let i=0;i<4;i++) c += CODE_CHARS[Math.floor(Math.random()*CODE_CHARS.length)]; return c; }
+function netStatus(t){ document.getElementById("netstatus").textContent = t; }
+function cleanupNet(){
+  try{ if(conn) conn.close(); }catch(e){}
+  try{ if(peer) peer.destroy(); }catch(e){}
+  conn = null; peer = null; online = false;
+}
+function hostRoom(){
+  if(typeof Peer === "undefined"){ netStatus("Sem internet — o módulo online não carregou. Recarregue a página."); return; }
+  cleanupNet();
+  const code = makeCode();
+  netStatus("Criando sala...");
+  peer = new Peer("tanq-" + code.toLowerCase());
+  peer.on("open", () => netStatus("Sala criada! Código: " + code + " — esperando o outro jogador entrar..."));
+  peer.on("error", e => {
+    if(e.type === "unavailable-id") hostRoom(); // código já em uso, sorteia outro
+    else netStatus("Erro de conexão (" + e.type + "). Tente de novo.");
+  });
+  peer.on("connection", c => {
+    conn = c;
+    conn.on("open", () => { isHost = true; myIndex = 0; wireConn(); sendInit(); });
+  });
+}
+function joinRoom(){
+  if(typeof Peer === "undefined"){ netStatus("Sem internet — o módulo online não carregou. Recarregue a página."); return; }
+  const code = document.getElementById("codein").value.trim().toLowerCase();
+  if(code.length !== 4){ netStatus("Digite o código de 4 letras da sala."); return; }
+  cleanupNet();
+  netStatus("Entrando na sala " + code.toUpperCase() + "...");
+  peer = new Peer();
+  peer.on("error", e => {
+    netStatus(e.type === "peer-unavailable" ? "Sala não encontrada — confira o código." : "Erro de conexão (" + e.type + "). Tente de novo.");
+  });
+  peer.on("open", () => {
+    conn = peer.connect("tanq-" + code, { reliable: true });
+    conn.on("open", () => { isHost = false; myIndex = 1; wireConn(); netStatus("Conectado! Começando..."); });
+  });
+}
+function wireConn(){
+  conn.on("data", handleMsg);
+  conn.on("close", () => {
+    if(!online) return;
+    online = false;
+    toast("❌ O outro jogador saiu da partida.", 2500);
+    setTimeout(() => {
+      document.getElementById("gameover").classList.add("hidden");
+      document.getElementById("onlinemenu").classList.add("hidden");
+      document.getElementById("menu").classList.remove("hidden");
+      cleanupNet();
+    }, 1800);
+  });
+}
+function sendMsg(m){ if(conn && conn.open) conn.send(m); }
+function sendInit(){
+  const seed = (Math.random()*2147483647)|0;
+  const w = -0.035 + Math.random()*0.07;
+  const first = Math.random() < 0.5 ? 0 : 1;
+  sendMsg({ type:"init", seed, wind:w, first });
+  startOnlineGame(seed, w, first);
+}
+function startOnlineGame(seed, w, first){
+  online = true; vsCPU = false;
+  clearTimeout(cpuTimeout);
+  rng = mulberry32(seed);   // terreno idêntico nos dois aparelhos
+  genTerrain();
+  rng = Math.random;
+  tanks = [
+    makeTank(110, "#3d8bff", "🔵 Azul", false),
+    makeTank(W-110, "#ff5540", "🔴 Vermelho", false)
+  ];
+  document.getElementById("hp1name").textContent = myIndex===0 ? "🔵 Azul (você)" : "🔵 Azul";
+  document.getElementById("hp2name").textContent = myIndex===1 ? "🔴 Vermelho (você)" : "🔴 Vermelho";
+  projectiles = []; particles = []; floaters = []; pendingSync = null;
+  cur = first; nextWindOverride = w;
+  updateHP();
+  document.getElementById("menu").classList.add("hidden");
+  document.getElementById("onlinemenu").classList.add("hidden");
+  document.getElementById("gameover").classList.add("hidden");
+  startTurn();
+}
+function handleMsg(m){
+  if(!m || !m.type) return;
+  if(m.type === "init"){ startOnlineGame(m.seed, m.wind, m.first); }
+  else if(m.type === "move"){
+    const t = tanks[1-myIndex];
+    if(t && t.alive){ t.x = m.x; t.y = groundAt(t.x); }
+  }
+  else if(m.type === "shot"){
+    const t = tanks[1-myIndex];
+    if(!t || !t.alive || state !== "AIM") return;
+    t.x = m.x; t.y = groundAt(t.x);
+    t.aim.ang = m.ang; t.aim.pow = m.pow; t.weapon = m.weapon;
+    fire(t);
+  }
+  else if(m.type === "sync"){
+    if(state === "SYNC"){ applySync(m); endTurn(); }
+    else pendingSync = m;
+  }
+  else if(m.type === "again"){ if(isHost) sendInit(); }
+}
+// quem atirou é a autoridade do turno: manda HP, posições e terreno oficiais
+function sendSync(){
+  const w = -0.035 + Math.random()*0.07;
+  nextWindOverride = w;
+  sendMsg({ type:"sync", wind:w,
+            hp: tanks.map(t => t.hp),
+            xs: tanks.map(t => Math.round(t.x*10)/10),
+            g: Array.from(ground, v => Math.round(v*10)) });
+}
+function applySync(m){
+  for(let i=0;i<W;i++) ground[i] = m.g[i]/10;
+  tanks.forEach((t,i) => {
+    t.hp = m.hp[i]; t.x = m.xs[i];
+    t.y = groundAt(t.x); t.vy = 0; t.fallFrom = null;
+  });
+  nextWindOverride = m.wind;
+  updateHP();
+}
+document.getElementById("btnonline").addEventListener("click", () => {
+  audio();
+  document.getElementById("menu").classList.add("hidden");
+  document.getElementById("onlinemenu").classList.remove("hidden");
+  netStatus("");
+});
+document.getElementById("btnback").addEventListener("click", () => {
+  cleanupNet();
+  document.getElementById("onlinemenu").classList.add("hidden");
+  document.getElementById("menu").classList.remove("hidden");
+});
+document.getElementById("btncreate").addEventListener("click", () => { audio(); hostRoom(); });
+document.getElementById("btnjoin").addEventListener("click", () => { audio(); joinRoom(); });
+
 // ============ INÍCIO ============
 function newGame(cpu){
   vsCPU = cpu;
+  if(online || peer) cleanupNet();
   clearTimeout(cpuTimeout);
   genTerrain();
   tanks = [
@@ -673,7 +861,13 @@ function newGame(cpu){
 }
 document.getElementById("btn1p").addEventListener("click", () => { audio(); newGame(true); });
 document.getElementById("btn2p").addEventListener("click", () => { audio(); newGame(false); });
-document.getElementById("btnagain").addEventListener("click", () => { audio(); newGame(vsCPU); });
+document.getElementById("btnagain").addEventListener("click", () => {
+  audio();
+  if(online){
+    if(isHost) sendInit();
+    else { sendMsg({type:"again"}); toast("🔄 Pedindo revanche...", 1600); }
+  } else newGame(vsCPU);
+});
 
 // escala responsiva
 function fit(){
