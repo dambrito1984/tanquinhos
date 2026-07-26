@@ -41,7 +41,8 @@
   #fuellabel { font-size:10px; color:#fffa; text-align:center; margin-top:2px; }
 
   #weapons { display:flex; gap:6px; }
-  .wbtn { padding:8px 10px; font-size:13px; background:rgba(255,255,255,.85); color:#223; box-shadow:0 3px 0 rgba(0,0,0,.3); }
+  .wbtn { padding:7px 9px; font-size:17px; background:rgba(255,255,255,.85); color:#223; box-shadow:0 3px 0 rgba(0,0,0,.3); }
+  .wbtn span { font-size:11px; font-weight:800; margin-left:2px; vertical-align:top; }
   .wbtn.sel { background:#ffd23e; outline:3px solid #fff; }
   .wbtn:disabled { opacity:.4; cursor:default; }
   #hint { font-size:11px; color:#fffc; background:rgba(10,20,35,.6); padding:6px 10px; border-radius:8px; max-width:150px; text-align:center; }
@@ -58,6 +59,14 @@
             text-transform:uppercase; font-weight:800; letter-spacing:3px; }
   #netstatus { min-height:24px; font-size:15px; color:#ffd23e; font-weight:600; max-width:400px; }
   .backbtn { background:#33415c; color:#fff; padding:10px 22px; font-size:14px; }
+  #chgrid { display:grid; grid-template-columns:1fr 1fr; gap:10px; max-width:460px; }
+  .chbtn { display:flex; flex-direction:column; align-items:center; gap:4px; padding:14px 10px;
+           background:rgba(255,255,255,.92); color:#223; }
+  .chbtn .chicon { font-size:30px; }
+  .chbtn small { font-weight:600; opacity:.75; font-size:11px; line-height:1.3; }
+  .chchips { display:flex; gap:6px; align-items:center; font-size:14px; }
+  .chchip { font-size:20px; padding:6px 9px; background:rgba(255,255,255,.25); border-radius:10px; }
+  .chchip.sel { background:#ffd23e; outline:2px solid #fff; }
 </style>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
@@ -80,9 +89,12 @@
       <div id="fuellabel">combustível</div>
     </div>
     <div id="weapons">
-      <button class="btn wbtn sel" data-w="normal">🎯 Tiro</button>
-      <button class="btn wbtn" data-w="big">💣 Bombão <span id="ammobig">2</span></button>
-      <button class="btn wbtn" data-w="triple">🎆 Tripla <span id="ammotriple">2</span></button>
+      <button class="btn wbtn sel" data-w="normal" title="Tiro">🎯</button>
+      <button class="btn wbtn" data-w="big" title="Bombão">💣<span>2</span></button>
+      <button class="btn wbtn" data-w="triple" title="Tripla">🎆<span>2</span></button>
+      <button class="btn wbtn" data-w="cluster" title="Cacho">🧨<span>2</span></button>
+      <button class="btn wbtn" data-w="terra" title="Bomba de terra">🏔️<span>2</span></button>
+      <button class="btn wbtn" data-w="pula" title="Pula-pula">🦘<span>3</span></button>
     </div>
     <div id="hint">Arraste na tela para mirar,<br>solte para atirar!</div>
   </div>
@@ -100,6 +112,12 @@
   <div class="overlay hidden" id="onlinemenu">
     <h1>🌐 Jogar online</h1>
     <p>Cada um no seu aparelho! Um <b>cria a sala</b> e fala o código;<br>o outro <b>digita o código</b> para entrar.</p>
+    <div class="chchips">Seu tanque:
+      <button class="btn chchip sel" data-chc="padrao" title="Padrão">⚙️</button>
+      <button class="btn chchip" data-chc="rodoes" title="Rodões">🛞</button>
+      <button class="btn chchip" data-chc="blindado" title="Blindado">🛡️</button>
+      <button class="btn chchip" data-chc="turbo" title="Turbo">🏎️</button>
+    </div>
     <button class="btn bigbtn" id="btncreate">🏠 Criar sala</button>
     <div id="joinrow">
       <input id="codein" maxlength="4" placeholder="CÓDIGO" autocomplete="off" autocapitalize="characters">
@@ -107,6 +125,16 @@
     </div>
     <div id="netstatus"></div>
     <button class="btn backbtn" id="btnback">← Voltar</button>
+  </div>
+
+  <div class="overlay hidden" id="chassismenu">
+    <h1 id="chtitle">Escolha seu tanque</h1>
+    <div id="chgrid">
+      <button class="btn chbtn" data-ch="padrao"><span class="chicon">⚙️</span><b>Padrão</b><small>Equilibrado em tudo</small></button>
+      <button class="btn chbtn" data-ch="rodoes"><span class="chicon">🛞</span><b>Rodões</b><small>Sobe quase tudo, +gasolina<br>−25% de dano causado</small></button>
+      <button class="btn chbtn" data-ch="blindado"><span class="chicon">🛡️</span><b>Blindado</b><small>−30% de dano recebido<br>lento e não sobe rampas</small></button>
+      <button class="btn chbtn" data-ch="turbo"><span class="chicon">🏎️</span><b>Turbo</b><small>Rápido, muita gasolina<br>−20% de vida</small></button>
+    </div>
   </div>
 
   <div class="overlay hidden" id="gameover">
@@ -123,13 +151,22 @@ const W = 960, H = 540;
 const G = 0.22;            // gravidade px/frame²
 const MAXPOW = 21;         // velocidade máxima do tiro
 const MAXDRAG = 150;       // distância de arrasto p/ potência máxima
-const FUEL_MAX = 120;
-const MOVE_SPEED = 1.15;
-const MAX_CLIMB = 1.35;    // inclinação máxima que o tanque sobe (px de subida por px andado)
+const MOVE_SPEED = 1.15;   // base; multiplicada pela velocidade do chassi
 const WEAPONS = {
-  normal: { r: 32, dmg: 38, name: "Tiro" },
-  big:    { r: 56, dmg: 62, name: "Bombão" },
-  triple: { r: 22, dmg: 24, name: "Tripla" }
+  normal: { r: 32, dmg: 38, icon:"🎯", name:"Tiro",           desc:"tiro padrão, sem limite" },
+  big:    { r: 56, dmg: 62, icon:"💣", name:"Bombão",         desc:"cratera gigante" },
+  triple: { r: 22, dmg: 24, icon:"🎆", name:"Tripla",         desc:"3 tiros em leque" },
+  cluster:{ r: 24, dmg: 18, icon:"🧨", name:"Cacho",          desc:"solta 4 bombinhas ao explodir" },
+  mini:   { r: 18, dmg: 13 }, // bombinha do Cacho (não aparece nos botões)
+  terra:  { r: 46, dmg: 0,  icon:"🏔️", name:"Bomba de terra", desc:"constrói um morro — boa p/ escapar de buracos!" },
+  pula:   { r: 36, dmg: 42, icon:"🦘", name:"Pula-pula",      desc:"quica 2 vezes antes de explodir" }
+};
+const AMMO_START = { big:2, triple:2, cluster:2, terra:2, pula:3 };
+const CHASSIS = {
+  padrao:  { icon:"⚙️", label:"Padrão",   dmgMul:1,    takenMul:1,   climb:1.35, fuel:120, speed:1,   hpMax:100 },
+  rodoes:  { icon:"🛞", label:"Rodões",   dmgMul:0.75, takenMul:1,   climb:3.2,  fuel:150, speed:1,   hpMax:100 },
+  blindado:{ icon:"🛡️", label:"Blindado", dmgMul:1,    takenMul:0.7, climb:0.95, fuel:80,  speed:0.7, hpMax:100 },
+  turbo:   { icon:"🏎️", label:"Turbo",    dmgMul:1,    takenMul:1,   climb:1.6,  fuel:210, speed:1.6, hpMax:80 }
 };
 
 const cv = document.getElementById("game");
@@ -210,10 +247,11 @@ function crater(cx, cy, r){
 }
 
 // ============ TANQUES ============
-function makeTank(x, color, name, isCPU){
-  return { x, y: groundAt(x), vy:0, fallFrom:null, hp:100, color, name, isCPU,
+function makeTank(x, color, name, isCPU, ch){
+  ch = ch || "padrao";
+  return { x, y: groundAt(x), vy:0, fallFrom:null, hp:CHASSIS[ch].hpMax, color, name, isCPU, chassis:ch,
            aim:{ang: x < W/2 ? -Math.PI/4 : -3*Math.PI/4, pow:0.6},
-           fuel: FUEL_MAX, ammo:{big:2, triple:2}, weapon:"normal", alive:true };
+           fuel: CHASSIS[ch].fuel, ammo: Object.assign({}, AMMO_START), weapon:"normal", alive:true };
 }
 function tankPhysics(t){
   if(!t.alive) return;
@@ -225,7 +263,7 @@ function tankPhysics(t){
       t.y = gy; t.vy = 0;
       const fell = gy - t.fallFrom; t.fallFrom = null;
       if(fell > 70 && t.alive){
-        const d = Math.round((fell-70)*0.35);
+        const d = Math.round((fell-70)*0.35*CHASSIS[t.chassis].takenMul);
         if(d>0){ t.hp -= d; addFloater(t.x, t.y-40, "-"+d+" 💥queda", "#ffd23e"); updateHP(); }
       }
     }
@@ -237,9 +275,11 @@ function slopeAngle(x){
 function tryMove(t, dir){
   if(t.fuel <= 0){ toast("⛽ Sem combustível!", 900); return; }
   if(t.fallFrom !== null) return;
-  const nx = clamp(t.x + dir*MOVE_SPEED, 26, W-26);
+  const ch = CHASSIS[t.chassis];
+  const step = MOVE_SPEED * ch.speed;
+  const nx = clamp(t.x + dir*step, 26, W-26);
   const rise = groundAt(t.x) - groundAt(nx); // >0 = subida
-  if(rise > MAX_CLIMB*MOVE_SPEED){ toast("🕳️ Muito íngreme! O tanque não sobe!", 1100); return; }
+  if(rise > ch.climb*step){ toast("🕳️ Muito íngreme! O tanque não sobe!", 1100); return; }
   t.x = nx; t.y = groundAt(nx);
   t.fuel -= 1;
   updateFuel();
@@ -257,7 +297,19 @@ function stepProj(p){
     p.x += p.vx/2; p.y += p.vy/2;
     p.age += 0.5;
     if(p.x < -60 || p.x > W+60) return {gone:true};
-    if(p.y >= groundAt(p.x)) return {hit:true};
+    if(p.y >= groundAt(p.x)){
+      if(p.weapon === "pula" && (p.bounces||0) < 2){
+        // quica: reflete a velocidade na normal do terreno e amortece
+        p.bounces = (p.bounces||0) + 1;
+        const s = (groundAt(p.x+4) - groundAt(p.x-4)) / 8;
+        const nl = Math.hypot(s, 1), nx = s/nl, ny = -1/nl;
+        const dot = p.vx*nx + p.vy*ny;
+        p.vx = (p.vx - 2*dot*nx) * 0.55;
+        p.vy = (p.vy - 2*dot*ny) * 0.55;
+        p.y = groundAt(p.x) - 1.5;
+        if(state === "FLY") sfxBounce();
+      } else return {hit:true};
+    }
     for(const t of tanks){
       if(!t.alive) continue;
       if(t === p.owner && p.age < 20) continue;
@@ -291,6 +343,16 @@ function fire(t){
 }
 function explode(x, y, wkey, owner){
   const wp = WEAPONS[wkey];
+  if(wkey === "terra"){
+    // não destrói: constrói um morro de terra
+    buildMound(x, wp.r);
+    shake = 6; sfxBoom(24);
+    for(let i=0;i<26;i++){
+      const a = rand(-Math.PI, 0), sp = rand(1, 4);
+      particles.push({ x, y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-1, life:rand(20,45), c:"#6b4b2a", r:rand(2,5) });
+    }
+    return;
+  }
   crater(x, y, wp.r);
   shake = Math.min(18, wp.r*0.28);
   sfxBoom(wp.r);
@@ -299,19 +361,32 @@ function explode(x, y, wkey, owner){
     particles.push({ x, y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp - rand(0,2),
                      life:rand(20,50), c: Math.random()<0.5 ? "#ff9a3d" : (Math.random()<0.5 ? "#6b4b2a" : "#ffd23e"), r:rand(2,5) });
   }
+  const shooterMul = owner ? CHASSIS[owner.chassis].dmgMul : 1;
   for(const t of tanks){
     if(!t.alive) continue;
     const d = Math.hypot(t.x-x, (t.y-9)-y);
     const maxD = wp.r*1.85;
     if(d < maxD){
-      const dmg = Math.round(wp.dmg * (1 - d/maxD));
+      const dmg = Math.round(wp.dmg * (1 - d/maxD) * shooterMul * CHASSIS[t.chassis].takenMul);
       if(dmg > 0){
         t.hp -= dmg;
         addFloater(t.x, t.y-42, "-"+dmg, t===owner ? "#ffd23e" : "#ff6b57");
       }
     }
   }
+  if(wkey === "cluster"){
+    for(let i=0;i<4;i++){
+      projectiles.push({ x, y: y-8, vx: rand(-4.5,4.5), vy: rand(-8.5,-4), age: 30, owner, weapon:"mini" });
+    }
+  }
   updateHP();
+}
+function buildMound(cx, r){
+  const x0 = Math.max(0, Math.ceil(cx-r)), x1 = Math.min(W-1, Math.floor(cx+r));
+  for(let x=x0; x<=x1; x++){
+    const dx = x-cx, h = Math.sqrt(Math.max(0, r*r - dx*dx)) * 0.85;
+    ground[x] = clamp(ground[x] - h, H*0.12, H-4);
+  }
 }
 
 // ============ TURNOS ============
@@ -324,7 +399,7 @@ function newWind(){ setWind(rand(-0.035, 0.035)); }
 function canAct(){ return state === "AIM" && !tanks[cur].isCPU && (!online || cur === myIndex); }
 function startTurn(){
   const t = tanks[cur];
-  t.fuel = FUEL_MAX; t.weapon = "normal";
+  t.fuel = CHASSIS[t.chassis].fuel; t.weapon = "normal";
   state = "AIM";
   if(online){
     if(nextWindOverride !== null){ setWind(nextWindOverride); nextWindOverride = null; }
@@ -424,18 +499,18 @@ function toast(txt, ms){
   msgTimer = setTimeout(()=>{ el.style.opacity = 0; }, ms||1400);
 }
 function updateHP(){
-  document.getElementById("hp1fill").style.width = clamp(tanks[0].hp,0,100)+"%";
-  document.getElementById("hp2fill").style.width = clamp(tanks[1].hp,0,100)+"%";
+  document.getElementById("hp1fill").style.width = clamp(tanks[0].hp/CHASSIS[tanks[0].chassis].hpMax*100,0,100)+"%";
+  document.getElementById("hp2fill").style.width = clamp(tanks[1].hp/CHASSIS[tanks[1].chassis].hpMax*100,0,100)+"%";
 }
 function updateFuel(){
-  document.getElementById("fuelfill").style.width = (tanks[cur].fuel/FUEL_MAX*100)+"%";
+  document.getElementById("fuelfill").style.width = (tanks[cur].fuel/CHASSIS[tanks[cur].chassis].fuel*100)+"%";
 }
 function updateWeaponsUI(){
   const t = tanks[cur];
-  document.getElementById("ammobig").textContent = t.ammo.big;
-  document.getElementById("ammotriple").textContent = t.ammo.triple;
   document.querySelectorAll(".wbtn").forEach(b=>{
     const w = b.dataset.w;
+    const sp = b.querySelector("span");
+    if(sp) sp.textContent = t.ammo[w];
     b.classList.toggle("sel", t.weapon === w);
     b.disabled = (w!=="normal" && t.ammo[w]<=0) || t.isCPU || state!=="AIM" || (online && cur!==myIndex);
   });
@@ -452,6 +527,15 @@ function sfxFire(){
     g.gain.setValueAtTime(0.12, ac.currentTime);
     g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+0.2);
     o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime+0.22);
+  }catch(e){}
+}
+function sfxBounce(){
+  try{
+    const ac = audio(), o = ac.createOscillator(), g = ac.createGain();
+    o.type = "sine"; o.frequency.value = 300;
+    g.gain.setValueAtTime(0.08, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+0.1);
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime+0.11);
   }catch(e){}
 }
 function sfxBoom(r){
@@ -505,8 +589,8 @@ function draw(){
 
   // projéteis
   for(const p of projectiles){
-    ctx.fillStyle = "#222";
-    ctx.beginPath(); ctx.arc(p.x, p.y, p.weapon==="big"?7:5, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = p.weapon==="terra" ? "#6b4b2a" : (p.weapon==="pula" ? "#e67e22" : "#222");
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.weapon==="big"?7:(p.weapon==="mini"?3.5:5), 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = "rgba(255,150,50,.6)";
     ctx.beginPath(); ctx.arc(p.x-p.vx*0.7, p.y-p.vy*0.7, 3, 0, Math.PI*2); ctx.fill();
   }
@@ -540,14 +624,20 @@ function drawTank(t){
   ctx.save();
   ctx.translate(t.x, t.y);
   ctx.rotate(rot);
-  // esteira
+  // esteira (visual muda por chassi)
   ctx.fillStyle = "#2f2f2f";
   rr(-17, -8, 34, 9, 4.5); ctx.fill();
   ctx.fillStyle = "#555";
-  for(let i=-12;i<=12;i+=6){ ctx.beginPath(); ctx.arc(i,-3.5,2.2,0,Math.PI*2); ctx.fill(); }
+  if(t.chassis === "rodoes"){
+    for(let i=-11;i<=11;i+=11){ ctx.beginPath(); ctx.arc(i,-4,4.2,0,Math.PI*2); ctx.fill(); }
+  } else {
+    for(let i=-12;i<=12;i+=6){ ctx.beginPath(); ctx.arc(i,-3.5,2.2,0,Math.PI*2); ctx.fill(); }
+  }
   // corpo
   ctx.fillStyle = t.color;
   rr(-14, -15, 28, 9, 4); ctx.fill();
+  if(t.chassis === "blindado"){ ctx.strokeStyle = "#222"; ctx.lineWidth = 2.5; rr(-14,-15,28,9,4); ctx.stroke(); }
+  if(t.chassis === "turbo"){ ctx.fillStyle = "#222"; ctx.fillRect(t.x < W/2 ? -18 : 14, -19, 4, 6); }
   ctx.restore();
   // torre + cano (sem rotação de inclinação, cano segue a mira)
   ctx.save();
@@ -702,8 +792,29 @@ document.querySelectorAll(".wbtn").forEach(b => {
     if(w !== "normal" && t.ammo[w] <= 0) return;
     t.weapon = w;
     updateWeaponsUI();
+    toast(WEAPONS[w].icon + " " + WEAPONS[w].name + " — " + WEAPONS[w].desc, 1600);
   });
 });
+
+// ============ ESCOLHA DE CHASSI ============
+const CH_KEYS = ["padrao","rodoes","blindado","turbo"];
+let p1Ch = "padrao", p2Ch = "padrao", selChassisOnline = "padrao", guestCh = "padrao", chassisCb = null;
+function openChassis(title, cb){
+  document.getElementById("chtitle").textContent = title;
+  document.getElementById("menu").classList.add("hidden");
+  document.getElementById("chassismenu").classList.remove("hidden");
+  chassisCb = cb;
+}
+document.querySelectorAll(".chbtn").forEach(b => b.addEventListener("click", () => {
+  audio();
+  document.getElementById("chassismenu").classList.add("hidden");
+  const cb = chassisCb; chassisCb = null;
+  if(cb) cb(b.dataset.ch);
+}));
+document.querySelectorAll(".chchip").forEach(b => b.addEventListener("click", () => {
+  selChassisOnline = b.dataset.chc;
+  document.querySelectorAll(".chchip").forEach(c => c.classList.toggle("sel", c === b));
+}));
 
 // ============ ONLINE (WebRTC via PeerJS) ============
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // sem 0/O/1/I para não confundir
@@ -727,7 +838,7 @@ function hostRoom(){
   });
   peer.on("connection", c => {
     conn = c;
-    conn.on("open", () => { isHost = true; myIndex = 0; wireConn(); sendInit(); });
+    conn.on("open", () => { isHost = true; myIndex = 0; wireConn(); netStatus("Jogador entrou! Preparando..."); });
   });
 }
 function joinRoom(){
@@ -742,7 +853,11 @@ function joinRoom(){
   });
   peer.on("open", () => {
     conn = peer.connect("tanq-" + code, { reliable: true });
-    conn.on("open", () => { isHost = false; myIndex = 1; wireConn(); netStatus("Conectado! Começando..."); });
+    conn.on("open", () => {
+      isHost = false; myIndex = 1; wireConn();
+      sendMsg({ type:"hello", ch: selChassisOnline });
+      netStatus("Conectado! Começando...");
+    });
   });
 }
 function wireConn(){
@@ -764,21 +879,23 @@ function sendInit(){
   const seed = (Math.random()*2147483647)|0;
   const w = -0.035 + Math.random()*0.07;
   const first = Math.random() < 0.5 ? 0 : 1;
-  sendMsg({ type:"init", seed, wind:w, first });
-  startOnlineGame(seed, w, first);
+  const ch = [selChassisOnline, guestCh];
+  sendMsg({ type:"init", seed, wind:w, first, ch });
+  startOnlineGame(seed, w, first, ch);
 }
-function startOnlineGame(seed, w, first){
+function startOnlineGame(seed, w, first, ch){
+  ch = ch || ["padrao","padrao"];
   online = true; vsCPU = false;
   clearTimeout(cpuTimeout);
   rng = mulberry32(seed);   // terreno idêntico nos dois aparelhos
   genTerrain();
   rng = Math.random;
   tanks = [
-    makeTank(110, "#3d8bff", "🔵 Azul", false),
-    makeTank(W-110, "#ff5540", "🔴 Vermelho", false)
+    makeTank(110, "#3d8bff", "🔵 Azul", false, ch[0]),
+    makeTank(W-110, "#ff5540", "🔴 Vermelho", false, ch[1])
   ];
-  document.getElementById("hp1name").textContent = myIndex===0 ? "🔵 Azul (você)" : "🔵 Azul";
-  document.getElementById("hp2name").textContent = myIndex===1 ? "🔴 Vermelho (você)" : "🔴 Vermelho";
+  document.getElementById("hp1name").textContent = (myIndex===0 ? "🔵 Azul (você) " : "🔵 Azul ") + CHASSIS[ch[0]].icon;
+  document.getElementById("hp2name").textContent = (myIndex===1 ? "🔴 Vermelho (você) " : "🔴 Vermelho ") + CHASSIS[ch[1]].icon;
   projectiles = []; particles = []; floaters = []; pendingSync = null;
   cur = first; nextWindOverride = w;
   updateHP();
@@ -789,7 +906,8 @@ function startOnlineGame(seed, w, first){
 }
 function handleMsg(m){
   if(!m || !m.type) return;
-  if(m.type === "init"){ startOnlineGame(m.seed, m.wind, m.first); }
+  if(m.type === "init"){ startOnlineGame(m.seed, m.wind, m.first, m.ch); }
+  else if(m.type === "hello"){ guestCh = m.ch || "padrao"; if(isHost) sendInit(); }
   else if(m.type === "move"){
     const t = tanks[1-myIndex];
     if(t && t.alive){ t.x = m.x; t.y = groundAt(t.x); }
@@ -846,12 +964,11 @@ function newGame(cpu){
   clearTimeout(cpuTimeout);
   genTerrain();
   tanks = [
-    makeTank(110, "#3d8bff", "🔵 Azul", false),
-    makeTank(W-110, "#ff5540", cpu ? "🤖 CPU" : "🔴 Vermelho", cpu)
+    makeTank(110, "#3d8bff", "🔵 Azul", false, p1Ch),
+    makeTank(W-110, "#ff5540", cpu ? "🤖 CPU" : "🔴 Vermelho", cpu, p2Ch)
   ];
-  document.getElementById("hp1name").textContent = "🔵 Azul (você)";
-  document.getElementById("hp2name").textContent = cpu ? "🤖 CPU" : "🔴 Vermelho";
-  if(!cpu) document.getElementById("hp1name").textContent = "🔵 Azul";
+  document.getElementById("hp1name").textContent = (cpu ? "🔵 Azul (você) " : "🔵 Azul ") + CHASSIS[p1Ch].icon;
+  document.getElementById("hp2name").textContent = (cpu ? "🤖 CPU " : "🔴 Vermelho ") + CHASSIS[p2Ch].icon;
   projectiles = []; particles = []; floaters = [];
   cur = Math.random() < 0.5 ? 0 : 1;
   updateHP();
@@ -859,8 +976,21 @@ function newGame(cpu){
   document.getElementById("gameover").classList.add("hidden");
   startTurn();
 }
-document.getElementById("btn1p").addEventListener("click", () => { audio(); newGame(true); });
-document.getElementById("btn2p").addEventListener("click", () => { audio(); newGame(false); });
+document.getElementById("btn1p").addEventListener("click", () => {
+  audio();
+  openChassis("Escolha seu tanque", k => {
+    p1Ch = k;
+    p2Ch = CH_KEYS[Math.floor(Math.random()*CH_KEYS.length)]; // CPU sorteia o dela
+    newGame(true);
+  });
+});
+document.getElementById("btn2p").addEventListener("click", () => {
+  audio();
+  openChassis("🔵 Jogador 1: escolha seu tanque", k => {
+    p1Ch = k;
+    openChassis("🔴 Jogador 2: escolha seu tanque", k2 => { p2Ch = k2; newGame(false); });
+  });
+});
 document.getElementById("btnagain").addEventListener("click", () => {
   audio();
   if(online){
