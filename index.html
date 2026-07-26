@@ -1,0 +1,692 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Tanquinhos! 💥</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; background:#1a2332; font-family:-apple-system,"Segoe UI",Roboto,sans-serif; overflow:hidden; touch-action:none; }
+  #wrap { position:relative; width:100vw; height:100vh; display:flex; align-items:center; justify-content:center; }
+  #stage { position:relative; }
+  canvas { display:block; border-radius:12px; touch-action:none; box-shadow:0 10px 40px rgba(0,0,0,.5); }
+
+  .hud { position:absolute; pointer-events:none; user-select:none; -webkit-user-select:none; }
+
+  .hpcard { top:10px; width:180px; background:rgba(10,20,35,.72); border-radius:10px; padding:7px 10px; color:#fff; }
+  #hp1card { left:10px; border-left:4px solid #4da3ff; }
+  #hp2card { right:10px; border-right:4px solid #ff6b57; text-align:right; }
+  .hpname { font-size:13px; font-weight:700; margin-bottom:4px; }
+  .hpbar { height:10px; background:rgba(255,255,255,.15); border-radius:5px; overflow:hidden; }
+  .hpfill { height:100%; border-radius:5px; transition:width .3s; }
+  #hp1fill { background:linear-gradient(90deg,#3d8bff,#6fc3ff); }
+  #hp2fill { background:linear-gradient(90deg,#ff5540,#ffa07a); float:right; }
+
+  #windbox { top:10px; left:50%; transform:translateX(-50%); background:rgba(10,20,35,.72); border-radius:10px; padding:6px 14px; color:#fff; text-align:center; }
+  #windlabel { font-size:11px; opacity:.7; }
+  #windval { font-size:15px; font-weight:700; }
+
+  #toast { top:38%; left:50%; transform:translate(-50%,-50%); font-size:clamp(18px,3.5vw,30px); font-weight:800; color:#fff;
+           text-shadow:0 2px 10px rgba(0,0,0,.7); opacity:0; transition:opacity .25s; text-align:center; width:90%; }
+
+  #bottombar { bottom:10px; left:10px; right:10px; display:flex; align-items:flex-end; justify-content:space-between; gap:8px; pointer-events:none; }
+  .btn { pointer-events:auto; border:none; border-radius:12px; font-weight:800; cursor:pointer; user-select:none; -webkit-user-select:none; touch-action:none; }
+  .movebtn { width:56px; height:48px; font-size:22px; background:rgba(255,255,255,.92); color:#223; box-shadow:0 3px 0 rgba(0,0,0,.3); }
+  .movebtn:active { transform:translateY(2px); box-shadow:0 1px 0 rgba(0,0,0,.3); }
+  #movebox { display:flex; flex-direction:column; gap:5px; }
+  #movebtns { display:flex; gap:6px; }
+  #fuelbar { height:7px; background:rgba(255,255,255,.2); border-radius:4px; overflow:hidden; }
+  #fuelfill { height:100%; background:#ffd23e; border-radius:4px; }
+  #fuellabel { font-size:10px; color:#fffa; text-align:center; margin-top:2px; }
+
+  #weapons { display:flex; gap:6px; }
+  .wbtn { padding:8px 10px; font-size:13px; background:rgba(255,255,255,.85); color:#223; box-shadow:0 3px 0 rgba(0,0,0,.3); }
+  .wbtn.sel { background:#ffd23e; outline:3px solid #fff; }
+  .wbtn:disabled { opacity:.4; cursor:default; }
+  #hint { font-size:11px; color:#fffc; background:rgba(10,20,35,.6); padding:6px 10px; border-radius:8px; max-width:150px; text-align:center; }
+
+  .overlay { position:absolute; inset:0; background:rgba(8,14,26,.86); border-radius:12px; display:flex; flex-direction:column;
+             align-items:center; justify-content:center; gap:14px; color:#fff; text-align:center; padding:20px; z-index:10; }
+  .overlay h1 { font-size:clamp(28px,6vw,46px); }
+  .overlay p { opacity:.85; font-size:14px; line-height:1.5; max-width:420px; }
+  .bigbtn { padding:14px 30px; font-size:18px; background:linear-gradient(180deg,#ffd23e,#ffb52e); color:#402; box-shadow:0 4px 0 #b57e00; }
+  .bigbtn:active { transform:translateY(3px); box-shadow:0 1px 0 #b57e00; }
+  .hidden { display:none !important; }
+</style>
+</head>
+<body>
+<div id="wrap"><div id="stage">
+  <canvas id="game" width="960" height="540"></canvas>
+
+  <div class="hud hpcard" id="hp1card"><div class="hpname" id="hp1name">🔵 Jogador 1</div><div class="hpbar"><div class="hpfill" id="hp1fill" style="width:100%"></div></div></div>
+  <div class="hud hpcard" id="hp2card"><div class="hpname" id="hp2name">🔴 Jogador 2</div><div class="hpbar"><div class="hpfill" id="hp2fill" style="width:100%"></div></div></div>
+  <div class="hud" id="windbox"><div id="windlabel">VENTO</div><div id="windval">→ 5</div></div>
+  <div class="hud" id="toast"></div>
+
+  <div class="hud" id="bottombar">
+    <div id="movebox">
+      <div id="movebtns">
+        <button class="btn movebtn" id="btnL">◀</button>
+        <button class="btn movebtn" id="btnR">▶</button>
+      </div>
+      <div id="fuelbar"><div id="fuelfill" style="width:100%"></div></div>
+      <div id="fuellabel">combustível</div>
+    </div>
+    <div id="weapons">
+      <button class="btn wbtn sel" data-w="normal">🎯 Tiro</button>
+      <button class="btn wbtn" data-w="big">💣 Bombão <span id="ammobig">2</span></button>
+      <button class="btn wbtn" data-w="triple">🎆 Tripla <span id="ammotriple">2</span></button>
+    </div>
+    <div id="hint">Arraste na tela para mirar,<br>solte para atirar!</div>
+  </div>
+
+  <div class="overlay" id="menu">
+    <h1>Tanquinhos! 💥</h1>
+    <p>Aquela guerrinha de tanques do caderno, agora de verdade.<br>
+       Arraste para mirar (tipo estilingue), solte para atirar.<br>
+       O terreno é destruído de verdade — cuidado para não ficar preso na cratera! 🕳️</p>
+    <button class="btn bigbtn" id="btn1p">🤖 1 Jogador (vs CPU)</button>
+    <button class="btn bigbtn" id="btn2p">👥 2 Jogadores</button>
+  </div>
+
+  <div class="overlay hidden" id="gameover">
+    <h1 id="gotitle">🏆</h1>
+    <p id="gotext"></p>
+    <button class="btn bigbtn" id="btnagain">🔄 Jogar de novo</button>
+  </div>
+</div></div>
+
+<script>
+"use strict";
+// ============ CONSTANTES ============
+const W = 960, H = 540;
+const G = 0.22;            // gravidade px/frame²
+const MAXPOW = 21;         // velocidade máxima do tiro
+const MAXDRAG = 150;       // distância de arrasto p/ potência máxima
+const FUEL_MAX = 120;
+const MOVE_SPEED = 1.15;
+const MAX_CLIMB = 1.35;    // inclinação máxima que o tanque sobe (px de subida por px andado)
+const WEAPONS = {
+  normal: { r: 32, dmg: 38, name: "Tiro" },
+  big:    { r: 56, dmg: 62, name: "Bombão" },
+  triple: { r: 22, dmg: 24, name: "Tripla" }
+};
+
+const cv = document.getElementById("game");
+const ctx = cv.getContext("2d");
+const dpr = Math.min(window.devicePixelRatio || 1, 2);
+cv.width = W * dpr; cv.height = H * dpr;
+
+// ============ ESTADO ============
+let ground = new Float32Array(W);
+let clouds = [];
+let tanks = [];
+let projectiles = [];
+let particles = [];
+let floaters = [];       // textos flutuantes de dano
+let cur = 0;             // índice do jogador da vez
+let wind = 0;
+let state = "MENU";      // MENU | AIM | FLY | WAIT | END
+let vsCPU = true;
+let shake = 0;
+let waitTimer = 0;
+let drag = null;         // {sx,sy,cx,cy} arrasto de mira
+let moveDir = 0;         // -1,0,1 (botões seguros)
+let msgTimer = null;
+let cpuTimeout = null;
+
+const clamp = (v,a,b) => v<a?a:(v>b?b:v);
+const rand = (a,b) => a + Math.random()*(b-a);
+const randn = () => (Math.random()+Math.random()+Math.random()-1.5); // ~normal
+
+// ============ TERRENO ============
+function groundAt(x){
+  x = clamp(x, 0, W-1);
+  const i = Math.floor(x), f = x - i;
+  return ground[i]*(1-f) + ground[Math.min(i+1,W-1)]*f;
+}
+function genTerrain(){
+  const base = H*0.62;
+  const layers = [];
+  for(let k=1;k<=5;k++)
+    layers.push({ a:(H*0.17)/k, f:(Math.PI*2*k*rand(0.9,1.8))/W, p:rand(0,Math.PI*2) });
+  for(let x=0;x<W;x++){
+    let h = base;
+    for(const L of layers) h += L.a*Math.sin(x*L.f + L.p);
+    ground[x] = clamp(h, H*0.28, H*0.9);
+  }
+  flattenAt(110); flattenAt(W-110);
+  clouds = [];
+  for(let i=0;i<4;i++) clouds.push({x:rand(60,W-60), y:rand(40,150), s:rand(0.7,1.4), v:rand(0.05,0.15)});
+}
+function flattenAt(cx){
+  const y = ground[cx|0];
+  for(let x=cx-50; x<=cx+50; x++){
+    const xi = clamp(x|0, 0, W-1);
+    const t = clamp((Math.abs(x-cx)-28)/22, 0, 1);
+    ground[xi] = y*(1-t) + ground[xi]*t;
+  }
+}
+function crater(cx, cy, r){
+  const x0 = Math.max(0, Math.ceil(cx-r)), x1 = Math.min(W-1, Math.floor(cx+r));
+  for(let x=x0; x<=x1; x++){
+    const dx = x-cx, s = Math.sqrt(Math.max(0, r*r - dx*dx));
+    const top = cy-s, bot = cy+s, g = ground[x];
+    if(g >= bot) continue;
+    ground[x] = Math.min(g <= top ? g + 2*s : bot, H-4);
+  }
+}
+
+// ============ TANQUES ============
+function makeTank(x, color, name, isCPU){
+  return { x, y: groundAt(x), vy:0, fallFrom:null, hp:100, color, name, isCPU,
+           aim:{ang: x < W/2 ? -Math.PI/4 : -3*Math.PI/4, pow:0.6},
+           fuel: FUEL_MAX, ammo:{big:2, triple:2}, weapon:"normal", alive:true };
+}
+function tankPhysics(t){
+  if(!t.alive) return;
+  const gy = groundAt(t.x);
+  if(t.y < gy - 0.5){
+    if(t.fallFrom === null) t.fallFrom = t.y;
+    t.vy += G; t.y += t.vy;
+    if(t.y >= gy){
+      t.y = gy; t.vy = 0;
+      const fell = gy - t.fallFrom; t.fallFrom = null;
+      if(fell > 70 && t.alive){
+        const d = Math.round((fell-70)*0.35);
+        if(d>0){ t.hp -= d; addFloater(t.x, t.y-40, "-"+d+" 💥queda", "#ffd23e"); updateHP(); }
+      }
+    }
+  } else { t.y = gy; t.vy = 0; t.fallFrom = null; }
+}
+function slopeAngle(x){
+  return Math.atan2(groundAt(x+7)-groundAt(x-7), 14);
+}
+function tryMove(t, dir){
+  if(t.fuel <= 0){ toast("⛽ Sem combustível!", 900); return; }
+  if(t.fallFrom !== null) return;
+  const nx = clamp(t.x + dir*MOVE_SPEED, 26, W-26);
+  const rise = groundAt(t.x) - groundAt(nx); // >0 = subida
+  if(rise > MAX_CLIMB*MOVE_SPEED){ toast("🕳️ Muito íngreme! O tanque não sobe!", 1100); return; }
+  t.x = nx; t.y = groundAt(nx);
+  t.fuel -= 1;
+  updateFuel();
+}
+
+// ============ PROJÉTEIS ============
+function stepProj(p){
+  // 2 meio-passos para colisão mais precisa
+  for(let s=0; s<2; s++){
+    p.vy += G/2; p.vx += wind/2;
+    p.x += p.vx/2; p.y += p.vy/2;
+    p.age += 0.5;
+    if(p.x < -60 || p.x > W+60) return {gone:true};
+    if(p.y >= groundAt(p.x)) return {hit:true};
+    for(const t of tanks){
+      if(!t.alive) continue;
+      if(t === p.owner && p.age < 20) continue;
+      if(Math.hypot(p.x-t.x, p.y-(t.y-9)) < 15) return {hit:true};
+    }
+  }
+  return {};
+}
+function fire(t){
+  const w = t.weapon;
+  if(w !== "normal"){
+    if(t.ammo[w] <= 0) return;
+    t.ammo[w]--;
+  }
+  const a = t.aim.ang, pow = t.aim.pow * MAXPOW;
+  const bx = t.x + Math.cos(a)*26, by = t.y - 12 + Math.sin(a)*26;
+  const shots = w === "triple" ? [-0.07, 0, 0.07] : [0];
+  for(const off of shots){
+    projectiles.push({ x:bx, y:by, vx:Math.cos(a+off)*pow, vy:Math.sin(a+off)*pow,
+                       age:0, owner:t, weapon:w });
+  }
+  sfxFire();
+  state = "FLY";
+  updateWeaponsUI();
+}
+function explode(x, y, wkey, owner){
+  const wp = WEAPONS[wkey];
+  crater(x, y, wp.r);
+  shake = Math.min(18, wp.r*0.28);
+  sfxBoom(wp.r);
+  for(let i=0;i<34;i++){
+    const a = rand(0, Math.PI*2), sp = rand(1, wp.r*0.12);
+    particles.push({ x, y, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp - rand(0,2),
+                     life:rand(20,50), c: Math.random()<0.5 ? "#ff9a3d" : (Math.random()<0.5 ? "#6b4b2a" : "#ffd23e"), r:rand(2,5) });
+  }
+  for(const t of tanks){
+    if(!t.alive) continue;
+    const d = Math.hypot(t.x-x, (t.y-9)-y);
+    const maxD = wp.r*1.85;
+    if(d < maxD){
+      const dmg = Math.round(wp.dmg * (1 - d/maxD));
+      if(dmg > 0){
+        t.hp -= dmg;
+        addFloater(t.x, t.y-42, "-"+dmg, t===owner ? "#ffd23e" : "#ff6b57");
+      }
+    }
+  }
+  updateHP();
+}
+
+// ============ TURNOS ============
+function newWind(){
+  wind = rand(-0.035, 0.035);
+  const v = Math.round(Math.abs(wind)*300);
+  document.getElementById("windval").textContent = (wind<0?"← ":"→ ") + v;
+}
+function startTurn(){
+  const t = tanks[cur];
+  t.fuel = FUEL_MAX; t.weapon = "normal";
+  state = "AIM";
+  newWind(); updateFuel(); updateWeaponsUI();
+  if(t.isCPU){
+    toast("🤖 CPU pensando...", 1200);
+    cpuTimeout = setTimeout(cpuPlay, rand(1000,1700));
+  } else {
+    toast(cur===0 ? "🔵 Sua vez!" : "🔴 Vez do Vermelho!", 1100);
+  }
+}
+function endTurn(){
+  const dead = tanks.filter(t => t.hp <= 0 && t.alive);
+  for(const t of dead){
+    t.alive = false; t.hp = 0;
+    explodeTankFX(t);
+  }
+  updateHP();
+  const alive = tanks.filter(t => t.alive);
+  if(alive.length <= 1){
+    state = "END";
+    setTimeout(()=>showGameOver(alive[0] || null), 1200);
+    return;
+  }
+  cur = 1 - cur;
+  startTurn();
+}
+function explodeTankFX(t){
+  shake = 20; sfxBoom(70);
+  for(let i=0;i<60;i++){
+    const a = rand(0,Math.PI*2), sp = rand(1,7);
+    particles.push({x:t.x, y:t.y-9, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-rand(0,3),
+                    life:rand(30,80), c:Math.random()<0.4?"#ff5540":"#333", r:rand(2,6)});
+  }
+}
+function showGameOver(winner){
+  const go = document.getElementById("gameover");
+  const title = document.getElementById("gotitle"), txt = document.getElementById("gotext");
+  if(!winner){ title.textContent = "💥 Empate!"; txt.textContent = "Os dois tanques foram destruídos!"; }
+  else {
+    title.textContent = "🏆 " + winner.name + " venceu!";
+    txt.textContent = winner.isCPU ? "A CPU levou essa... revanche?" : "Grande vitória de guerra! 🎖️";
+  }
+  go.classList.remove("hidden");
+}
+
+// ============ CPU ============
+function simShot(t, ang, pow){
+  const v = pow*MAXPOW;
+  let p = { x: t.x + Math.cos(ang)*26, y: t.y-12 + Math.sin(ang)*26,
+            vx: Math.cos(ang)*v, vy: Math.sin(ang)*v, age: 999, owner: null };
+  for(let i=0;i<500;i++){
+    const r = stepProj(p);
+    if(r.gone) return null;
+    if(r.hit) return {x:p.x, y:p.y};
+  }
+  return null;
+}
+function cpuPlay(){
+  const me = tanks[cur], foe = tanks[1-cur];
+  if(state !== "AIM" || !me.isCPU) return;
+  const dirTo = foe.x > me.x ? 1 : -1;
+  let best = null;
+  for(let deg=20; deg<=82; deg+=4){
+    for(let pw=0.35; pw<=1.0; pw+=0.07){
+      const ang = dirTo>0 ? -deg*Math.PI/180 : Math.PI + deg*Math.PI/180;
+      const hit = simShot(me, ang, pw);
+      if(!hit) continue;
+      let score = Math.abs(hit.x-foe.x) + Math.abs(hit.y-foe.y)*0.4;
+      if(Math.hypot(hit.x-me.x, hit.y-me.y) < 70) score += 400; // não se explodir
+      if(!best || score < best.score) best = {ang, pw, score};
+    }
+  }
+  if(!best){
+    const deg = rand(35,65);
+    best = {ang: dirTo>0 ? -deg*Math.PI/180 : Math.PI+deg*Math.PI/180, pw: rand(0.5,0.9)};
+  }
+  // erro humano da CPU
+  me.aim.ang = best.ang + randn()*0.05;
+  me.aim.pow = clamp(best.pw + randn()*0.035, 0.2, 1);
+  // escolhe arma: bombão se estiver perdendo e tiver munição
+  if(me.ammo.big > 0 && (me.hp < foe.hp - 15 || (foe.hp < 45 && Math.random()<0.5))) me.weapon = "big";
+  else if(me.ammo.triple > 0 && Math.random() < 0.25) me.weapon = "triple";
+  else me.weapon = "normal";
+  fire(me);
+}
+
+// ============ EFEITOS / UI ============
+function addFloater(x,y,txt,c){ floaters.push({x,y,txt,c,life:70}); }
+function toast(txt, ms){
+  const el = document.getElementById("toast");
+  el.textContent = txt; el.style.opacity = 1;
+  clearTimeout(msgTimer);
+  msgTimer = setTimeout(()=>{ el.style.opacity = 0; }, ms||1400);
+}
+function updateHP(){
+  document.getElementById("hp1fill").style.width = clamp(tanks[0].hp,0,100)+"%";
+  document.getElementById("hp2fill").style.width = clamp(tanks[1].hp,0,100)+"%";
+}
+function updateFuel(){
+  document.getElementById("fuelfill").style.width = (tanks[cur].fuel/FUEL_MAX*100)+"%";
+}
+function updateWeaponsUI(){
+  const t = tanks[cur];
+  document.getElementById("ammobig").textContent = t.ammo.big;
+  document.getElementById("ammotriple").textContent = t.ammo.triple;
+  document.querySelectorAll(".wbtn").forEach(b=>{
+    const w = b.dataset.w;
+    b.classList.toggle("sel", t.weapon === w);
+    b.disabled = (w!=="normal" && t.ammo[w]<=0) || t.isCPU || state!=="AIM";
+  });
+}
+
+// ============ SOM ============
+let AC = null;
+function audio(){ if(!AC) AC = new (window.AudioContext||window.webkitAudioContext)(); return AC; }
+function sfxFire(){
+  try{
+    const ac = audio(), o = ac.createOscillator(), g = ac.createGain();
+    o.type = "square"; o.frequency.setValueAtTime(500, ac.currentTime);
+    o.frequency.exponentialRampToValueAtTime(120, ac.currentTime+0.18);
+    g.gain.setValueAtTime(0.12, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime+0.2);
+    o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime+0.22);
+  }catch(e){}
+}
+function sfxBoom(r){
+  try{
+    const ac = audio(), dur = 0.25 + r/200;
+    const buf = ac.createBuffer(1, ac.sampleRate*dur, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i] = (Math.random()*2-1) * Math.pow(1-i/d.length, 2);
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 300 + r*4;
+    const g = ac.createGain(); g.gain.value = Math.min(0.5, 0.15 + r/200);
+    src.connect(f).connect(g).connect(ac.destination); src.start();
+  }catch(e){}
+}
+
+// ============ DESENHO ============
+function draw(){
+  ctx.setTransform(dpr,0,0,dpr,0,0);
+  if(shake > 0.5){ ctx.translate(rand(-shake,shake), rand(-shake,shake)); shake *= 0.85; }
+  // céu
+  const sky = ctx.createLinearGradient(0,0,0,H);
+  sky.addColorStop(0,"#7ec8f5"); sky.addColorStop(0.7,"#cfeaff"); sky.addColorStop(1,"#f5e9c8");
+  ctx.fillStyle = sky; ctx.fillRect(-25,-25,W+50,H+50);
+  // sol
+  ctx.fillStyle = "#ffe680"; ctx.beginPath(); ctx.arc(W-90, 70, 34, 0, Math.PI*2); ctx.fill();
+  // nuvens
+  ctx.fillStyle = "rgba(255,255,255,.85)";
+  for(const c of clouds){
+    c.x += c.v; if(c.x > W+80) c.x = -80;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, 18*c.s, 0, Math.PI*2);
+    ctx.arc(c.x+20*c.s, c.y+4*c.s, 14*c.s, 0, Math.PI*2);
+    ctx.arc(c.x-20*c.s, c.y+5*c.s, 13*c.s, 0, Math.PI*2);
+    ctx.fill();
+  }
+  // terreno
+  const dirt = ctx.createLinearGradient(0, H*0.3, 0, H);
+  dirt.addColorStop(0,"#8a6238"); dirt.addColorStop(1,"#5b3d22");
+  ctx.fillStyle = dirt;
+  ctx.beginPath(); ctx.moveTo(0, ground[0]);
+  for(let x=1;x<W;x++) ctx.lineTo(x, ground[x]);
+  ctx.lineTo(W, H+30); ctx.lineTo(0, H+30); ctx.closePath(); ctx.fill();
+  // grama
+  ctx.strokeStyle = "#4caf50"; ctx.lineWidth = 5; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(0, ground[0]);
+  for(let x=1;x<W;x++) ctx.lineTo(x, ground[x]);
+  ctx.stroke();
+
+  for(const t of tanks) drawTank(t);
+  drawAim();
+
+  // projéteis
+  for(const p of projectiles){
+    ctx.fillStyle = "#222";
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.weapon==="big"?7:5, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = "rgba(255,150,50,.6)";
+    ctx.beginPath(); ctx.arc(p.x-p.vx*0.7, p.y-p.vy*0.7, 3, 0, Math.PI*2); ctx.fill();
+  }
+  // partículas
+  for(const pt of particles){
+    ctx.globalAlpha = clamp(pt.life/30, 0, 1);
+    ctx.fillStyle = pt.c;
+    ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // floaters
+  ctx.font = "bold 17px sans-serif"; ctx.textAlign = "center";
+  for(const f of floaters){
+    ctx.globalAlpha = clamp(f.life/40, 0, 1);
+    ctx.fillStyle = f.c;
+    ctx.fillText(f.txt, f.x, f.y);
+  }
+  ctx.globalAlpha = 1;
+}
+function drawTank(t){
+  if(!t.alive){
+    // destroços
+    ctx.save(); ctx.translate(t.x, groundAt(t.x));
+    ctx.fillStyle = "#3a3a3a";
+    ctx.beginPath(); ctx.arc(0,-4,10,Math.PI,0); ctx.fill();
+    ctx.fillRect(-13,-5,26,5);
+    ctx.restore();
+    return;
+  }
+  const rot = slopeAngle(t.x);
+  ctx.save();
+  ctx.translate(t.x, t.y);
+  ctx.rotate(rot);
+  // esteira
+  ctx.fillStyle = "#2f2f2f";
+  rr(-17, -8, 34, 9, 4.5); ctx.fill();
+  ctx.fillStyle = "#555";
+  for(let i=-12;i<=12;i+=6){ ctx.beginPath(); ctx.arc(i,-3.5,2.2,0,Math.PI*2); ctx.fill(); }
+  // corpo
+  ctx.fillStyle = t.color;
+  rr(-14, -15, 28, 9, 4); ctx.fill();
+  ctx.restore();
+  // torre + cano (sem rotação de inclinação, cano segue a mira)
+  ctx.save();
+  ctx.translate(t.x, t.y-12);
+  ctx.fillStyle = t.color;
+  ctx.beginPath(); ctx.arc(0, -2, 7.5, 0, Math.PI*2); ctx.fill();
+  ctx.rotate(t.aim.ang);
+  ctx.fillStyle = "#333";
+  ctx.fillRect(0, -2.5, 26, 5);
+  ctx.restore();
+  // antena com bandeirinha
+  ctx.save();
+  ctx.translate(t.x, t.y-12);
+  ctx.strokeStyle = "#222"; ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.moveTo(-6,-6); ctx.lineTo(-9,-22); ctx.stroke();
+  ctx.fillStyle = t.color;
+  ctx.beginPath(); ctx.moveTo(-9,-22); ctx.lineTo(-1,-19); ctx.lineTo(-9,-16); ctx.closePath(); ctx.fill();
+  ctx.restore();
+  // indicador de vez
+  if(tanks[cur] === t && state === "AIM"){
+    ctx.fillStyle = "rgba(255,255,255,.9)";
+    const bob = Math.sin(Date.now()/200)*3;
+    ctx.beginPath();
+    ctx.moveTo(t.x, t.y-44+bob); ctx.lineTo(t.x-7, t.y-54+bob); ctx.lineTo(t.x+7, t.y-54+bob);
+    ctx.closePath(); ctx.fill();
+  }
+}
+function rr(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+}
+function drawAim(){
+  if(state !== "AIM" || !drag) return;
+  const t = tanks[cur];
+  if(t.isCPU) return;
+  // trajetória prevista (parcial — o resto é habilidade!)
+  const a = t.aim.ang, v = t.aim.pow * MAXPOW;
+  let p = { x: t.x + Math.cos(a)*26, y: t.y-12 + Math.sin(a)*26,
+            vx: Math.cos(a)*v, vy: Math.sin(a)*v, age: 999, owner: null };
+  ctx.fillStyle = "rgba(255,255,255,.85)";
+  for(let i=0;i<34;i++){
+    const r = stepProj(p);
+    if(r.hit || r.gone) break;
+    if(i % 3 === 0){
+      ctx.globalAlpha = 0.9 - i*0.022;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 3.4 - i*0.05, 0, Math.PI*2); ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+  // elástico visual
+  ctx.strokeStyle = "rgba(255,255,255,.5)"; ctx.lineWidth = 2; ctx.setLineDash([6,6]);
+  ctx.beginPath(); ctx.moveTo(drag.sx, drag.sy); ctx.lineTo(drag.cx, drag.cy); ctx.stroke();
+  ctx.setLineDash([]);
+  // medidor de força
+  ctx.fillStyle = "rgba(10,20,35,.7)";
+  rr(t.x-32, t.y-78, 64, 10, 5); ctx.fill();
+  ctx.fillStyle = t.aim.pow > 0.85 ? "#ff5540" : "#ffd23e";
+  rr(t.x-30, t.y-76, 60*t.aim.pow, 6, 3); ctx.fill();
+}
+
+// ============ LOOP ============
+function tick(){
+  // física
+  for(const t of tanks) tankPhysics(t);
+  if(state === "AIM" && moveDir !== 0 && !tanks[cur].isCPU) tryMove(tanks[cur], moveDir);
+  if(state === "FLY"){
+    for(let i=projectiles.length-1; i>=0; i--){
+      const p = projectiles[i];
+      const r = stepProj(p);
+      if(r.hit){ explode(p.x, p.y, p.weapon, p.owner); projectiles.splice(i,1); }
+      else if(r.gone){ projectiles.splice(i,1); }
+    }
+    if(projectiles.length === 0){ state = "WAIT"; waitTimer = 55; }
+  }
+  if(state === "WAIT"){
+    const settling = tanks.some(t => t.alive && t.fallFrom !== null);
+    if(!settling && --waitTimer <= 0) endTurn();
+  }
+  for(let i=particles.length-1;i>=0;i--){
+    const pt = particles[i];
+    pt.vy += G*0.6; pt.x += pt.vx; pt.y += pt.vy;
+    if(pt.y > groundAt(pt.x)) { pt.vy *= -0.3; pt.y = groundAt(pt.x); pt.vx *= 0.7; }
+    if(--pt.life <= 0) particles.splice(i,1);
+  }
+  for(let i=floaters.length-1;i>=0;i--){
+    const f = floaters[i]; f.y -= 0.7;
+    if(--f.life <= 0) floaters.splice(i,1);
+  }
+  draw();
+  requestAnimationFrame(tick);
+}
+
+// ============ ENTRADA ============
+function canvasPos(e){
+  const r = cv.getBoundingClientRect();
+  return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
+}
+cv.addEventListener("pointerdown", e => {
+  audio();
+  if(state !== "AIM" || tanks[cur].isCPU) return;
+  const p = canvasPos(e);
+  drag = { sx:p.x, sy:p.y, cx:p.x, cy:p.y };
+  cv.setPointerCapture(e.pointerId);
+});
+cv.addEventListener("pointermove", e => {
+  if(!drag) return;
+  const p = canvasPos(e);
+  drag.cx = p.x; drag.cy = p.y;
+  const dx = drag.sx - drag.cx, dy = drag.sy - drag.cy;
+  const d = Math.hypot(dx,dy);
+  if(d > 8){
+    const t = tanks[cur];
+    t.aim.ang = Math.atan2(dy, dx);
+    t.aim.pow = clamp(d/MAXDRAG, 0.12, 1);
+  }
+});
+cv.addEventListener("pointerup", e => {
+  if(!drag) return;
+  const dx = drag.sx - drag.cx, dy = drag.sy - drag.cy;
+  const d = Math.hypot(dx,dy);
+  drag = null;
+  if(d > 22 && state === "AIM" && !tanks[cur].isCPU) fire(tanks[cur]);
+});
+cv.addEventListener("pointercancel", () => { drag = null; });
+
+for(const [id,dir] of [["btnL",-1],["btnR",1]]){
+  const b = document.getElementById(id);
+  b.addEventListener("pointerdown", e => { e.preventDefault(); audio(); moveDir = dir; });
+  b.addEventListener("pointerup",   () => { moveDir = 0; });
+  b.addEventListener("pointerleave",() => { moveDir = 0; });
+}
+window.addEventListener("keydown", e => {
+  if(state !== "AIM" || tanks[cur].isCPU) return;
+  if(e.key === "ArrowLeft") moveDir = -1;
+  if(e.key === "ArrowRight") moveDir = 1;
+});
+window.addEventListener("keyup", e => {
+  if(e.key === "ArrowLeft" && moveDir === -1) moveDir = 0;
+  if(e.key === "ArrowRight" && moveDir === 1) moveDir = 0;
+});
+document.querySelectorAll(".wbtn").forEach(b => {
+  b.addEventListener("click", () => {
+    const t = tanks[cur];
+    if(state !== "AIM" || t.isCPU) return;
+    const w = b.dataset.w;
+    if(w !== "normal" && t.ammo[w] <= 0) return;
+    t.weapon = w;
+    updateWeaponsUI();
+  });
+});
+
+// ============ INÍCIO ============
+function newGame(cpu){
+  vsCPU = cpu;
+  clearTimeout(cpuTimeout);
+  genTerrain();
+  tanks = [
+    makeTank(110, "#3d8bff", "🔵 Azul", false),
+    makeTank(W-110, "#ff5540", cpu ? "🤖 CPU" : "🔴 Vermelho", cpu)
+  ];
+  document.getElementById("hp1name").textContent = "🔵 Azul (você)";
+  document.getElementById("hp2name").textContent = cpu ? "🤖 CPU" : "🔴 Vermelho";
+  if(!cpu) document.getElementById("hp1name").textContent = "🔵 Azul";
+  projectiles = []; particles = []; floaters = [];
+  cur = Math.random() < 0.5 ? 0 : 1;
+  updateHP();
+  document.getElementById("menu").classList.add("hidden");
+  document.getElementById("gameover").classList.add("hidden");
+  startTurn();
+}
+document.getElementById("btn1p").addEventListener("click", () => { audio(); newGame(true); });
+document.getElementById("btn2p").addEventListener("click", () => { audio(); newGame(false); });
+document.getElementById("btnagain").addEventListener("click", () => { audio(); newGame(vsCPU); });
+
+// escala responsiva
+function fit(){
+  const stage = document.getElementById("stage");
+  const s = Math.min(window.innerWidth/W, window.innerHeight/H) * 0.98;
+  cv.style.width = (W*s)+"px"; cv.style.height = (H*s)+"px";
+  stage.style.width = (W*s)+"px"; stage.style.height = (H*s)+"px";
+}
+window.addEventListener("resize", fit);
+fit();
+genTerrain();
+tanks = [ makeTank(110, "#3d8bff", "🔵 Azul", false), makeTank(W-110, "#ff5540", "🔴 Vermelho", false) ];
+requestAnimationFrame(tick);
+</script>
+</body>
+</html>
