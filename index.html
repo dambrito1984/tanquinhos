@@ -67,15 +67,30 @@
   .chchips { display:flex; gap:6px; align-items:center; font-size:14px; }
   .chchip { font-size:20px; padding:6px 9px; background:rgba(255,255,255,.25); border-radius:10px; }
   .chchip.sel { background:#ffd23e; outline:2px solid #fff; }
+  #btnfs { position:absolute; top:64px; right:10px; width:40px; height:40px; font-size:20px;
+           background:rgba(10,20,35,.6); color:#fff; z-index:5; }
+  #rotate { display:none; position:fixed; top:8px; left:50%; transform:translateX(-50%); background:#ffd23e;
+            color:#402; font-weight:800; padding:8px 14px; border-radius:10px; z-index:50; font-size:14px; }
+  @media (orientation:portrait) and (max-width:600px){ #rotate { display:block; } }
+  @media (max-width:700px){
+    .hpcard { width:126px; padding:5px 8px; }
+    .hpname { font-size:11px; }
+    #hint { display:none; }
+    #windbox { padding:4px 10px; }
+    #windval { font-size:13px; }
+    .wbtn { font-size:19px; padding:8px 10px; }
+  }
 </style>
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
 </head>
 <body>
+<div id="rotate">📱↻ Gire o celular para jogar melhor!</div>
 <div id="wrap"><div id="stage">
   <canvas id="game" width="960" height="540"></canvas>
 
   <div class="hud hpcard" id="hp1card"><div class="hpname" id="hp1name">🔵 Jogador 1</div><div class="hpbar"><div class="hpfill" id="hp1fill" style="width:100%"></div></div></div>
   <div class="hud hpcard" id="hp2card"><div class="hpname" id="hp2name">🔴 Jogador 2</div><div class="hpbar"><div class="hpfill" id="hp2fill" style="width:100%"></div></div></div>
+  <button class="btn" id="btnfs" title="Tela cheia">⛶</button>
   <div class="hud" id="windbox"><div id="windlabel">VENTO</div><div id="windval">→ 5</div></div>
   <div class="hud" id="toast"></div>
 
@@ -96,7 +111,7 @@
       <button class="btn wbtn" data-w="terra" title="Bomba de terra">🏔️<span>2</span></button>
       <button class="btn wbtn" data-w="pula" title="Pula-pula">🦘<span>3</span></button>
     </div>
-    <div id="hint">Arraste na tela para mirar,<br>solte para atirar!</div>
+    <div id="hint">Arraste para mirar, solte para atirar!<br>Pinça = zoom • 2 dedos = mover câmera</div>
   </div>
 
   <div class="overlay" id="menu">
@@ -152,6 +167,10 @@ const G = 0.22;            // gravidade px/frame²
 const MAXPOW = 21;         // velocidade máxima do tiro
 const MAXDRAG = 150;       // distância de arrasto p/ potência máxima
 const MOVE_SPEED = 1.15;   // base; multiplicada pela velocidade do chassi
+// tanques ~50% maiores p/ jogabilidade no celular (visual E hitbox)
+const TANK_HIT_R = 22;     // raio de colisão do tanque
+const TURRET_H = 18;       // altura do pivô do cano acima do chão
+const BARREL_L = 38;       // comprimento do cano (origem do tiro)
 const WEAPONS = {
   normal: { r: 32, dmg: 38, icon:"🎯", name:"Tiro",           desc:"tiro padrão, sem limite" },
   big:    { r: 56, dmg: 62, icon:"💣", name:"Bombão",         desc:"cratera gigante" },
@@ -191,6 +210,12 @@ let drag = null;         // {sx,sy,cx,cy} arrasto de mira
 let moveDir = 0;         // -1,0,1 (botões seguros)
 let msgTimer = null;
 let cpuTimeout = null;
+// câmera estilo Angry Birds (zoom + pan)
+let cam = { x:0, y:0, z:1 };
+let camGlide = 0;          // frames seguindo o tanque da vez
+let pointers = new Map();  // dedos na tela (p/ pinça)
+let pinchPrev = null, panDrag = null;
+let trees = [];            // árvores destrutíveis
 // online
 let online = false, isHost = false, myIndex = 0, peer = null, conn = null;
 let lastShooter = 0, pendingSync = null, nextWindOverride = null, lastMoveSent = 0;
@@ -206,6 +231,17 @@ function mulberry32(a){
   };
 }
 const rand = (a,b) => a + rng()*(b-a);
+function clampCam(){
+  cam.z = clamp(cam.z, 1, 2.6);
+  cam.x = clamp(cam.x, 0, W - W/cam.z);
+  cam.y = clamp(cam.y, 0, H - H/cam.z);
+}
+function zoomAt(sx, sy, f){
+  const wx = sx/cam.z + cam.x, wy = sy/cam.z + cam.y;
+  cam.z = clamp(cam.z*f, 1, 2.6);
+  cam.x = wx - sx/cam.z; cam.y = wy - sy/cam.z;
+  clampCam();
+}
 const randn = () => (Math.random()+Math.random()+Math.random()-1.5); // ~normal
 
 // ============ TERRENO ============
@@ -227,6 +263,16 @@ function genTerrain(){
   flattenAt(110); flattenAt(W-110);
   clouds = [];
   for(let i=0;i<4;i++) clouds.push({x:rand(60,W-60), y:rand(40,150), s:rand(0.7,1.4), v:rand(0.05,0.15)});
+  // árvores salteadas (fora das áreas de nascimento, com espaço entre elas)
+  trees = [];
+  let tries = 0;
+  while(trees.length < 4 && tries++ < 60){
+    const x = rand(180, W-180);
+    if(Math.abs(x-110) < 150 || Math.abs(x-(W-110)) < 150) continue;
+    if(trees.some(tr => Math.abs(tr.x-x) < 95)) continue;
+    trees.push({ x, h: rand(50,74), r: rand(20,28), hp: 55, alive: true, sway: rand(0,Math.PI*2) });
+  }
+  cam.x = 0; cam.y = 0; cam.z = 1;
 }
 function flattenAt(cx){
   const y = ground[cx|0];
@@ -264,13 +310,13 @@ function tankPhysics(t){
       const fell = gy - t.fallFrom; t.fallFrom = null;
       if(fell > 70 && t.alive){
         const d = Math.round((fell-70)*0.35*CHASSIS[t.chassis].takenMul);
-        if(d>0){ t.hp -= d; addFloater(t.x, t.y-40, "-"+d+" 💥queda", "#ffd23e"); updateHP(); }
+        if(d>0){ t.hp -= d; addFloater(t.x, t.y-56, "-"+d+" 💥queda", "#ffd23e"); updateHP(); }
       }
     }
   } else { t.y = gy; t.vy = 0; t.fallFrom = null; }
 }
 function slopeAngle(x){
-  return Math.atan2(groundAt(x+7)-groundAt(x-7), 14);
+  return Math.atan2(groundAt(x+10)-groundAt(x-10), 20);
 }
 function tryMove(t, dir){
   if(t.fuel <= 0){ toast("⛽ Sem combustível!", 900); return; }
@@ -297,6 +343,10 @@ function stepProj(p){
     p.x += p.vx/2; p.y += p.vy/2;
     p.age += 0.5;
     if(p.x < -60 || p.x > W+60) return {gone:true};
+    for(const tr of trees){
+      if(!tr.alive) continue;
+      if(Math.hypot(p.x-tr.x, p.y-(groundAt(tr.x)-tr.h)) < tr.r) return {hit:true};
+    }
     if(p.y >= groundAt(p.x)){
       if(p.weapon === "pula" && (p.bounces||0) < 2){
         // quica: reflete a velocidade na normal do terreno e amortece
@@ -313,7 +363,7 @@ function stepProj(p){
     for(const t of tanks){
       if(!t.alive) continue;
       if(t === p.owner && p.age < 20) continue;
-      if(Math.hypot(p.x-t.x, p.y-(t.y-9)) < 15) return {hit:true};
+      if(Math.hypot(p.x-t.x, p.y-(t.y-13)) < TANK_HIT_R) return {hit:true};
     }
   }
   return {};
@@ -331,7 +381,7 @@ function fire(t){
     t.ammo[w]--;
   }
   const a = t.aim.ang, pow = t.aim.pow * MAXPOW;
-  const bx = t.x + Math.cos(a)*26, by = t.y - 12 + Math.sin(a)*26;
+  const bx = t.x + Math.cos(a)*BARREL_L, by = t.y - TURRET_H + Math.sin(a)*BARREL_L;
   const shots = w === "triple" ? [-0.07, 0, 0.07] : [0];
   for(const off of shots){
     projectiles.push({ x:bx, y:by, vx:Math.cos(a+off)*pow, vy:Math.sin(a+off)*pow,
@@ -364,13 +414,31 @@ function explode(x, y, wkey, owner){
   const shooterMul = owner ? CHASSIS[owner.chassis].dmgMul : 1;
   for(const t of tanks){
     if(!t.alive) continue;
-    const d = Math.hypot(t.x-x, (t.y-9)-y);
+    const d = Math.hypot(t.x-x, (t.y-13)-y);
     const maxD = wp.r*1.85;
     if(d < maxD){
       const dmg = Math.round(wp.dmg * (1 - d/maxD) * shooterMul * CHASSIS[t.chassis].takenMul);
       if(dmg > 0){
         t.hp -= dmg;
-        addFloater(t.x, t.y-42, "-"+dmg, t===owner ? "#ffd23e" : "#ff6b57");
+        addFloater(t.x, t.y-56, "-"+dmg, t===owner ? "#ffd23e" : "#ff6b57");
+      }
+    }
+  }
+  // dano nas árvores
+  for(const tr of trees){
+    if(!tr.alive) continue;
+    const cy = groundAt(tr.x) - tr.h;
+    const dt = Math.hypot(tr.x-x, cy-y);
+    const reach = wp.r*1.6 + tr.r;
+    if(dt < reach){
+      tr.hp -= wp.dmg * (1 - dt/reach*0.5);
+      if(tr.hp <= 0){
+        tr.alive = false;
+        for(let i=0;i<24;i++){
+          const a2 = rand(0,Math.PI*2), sp2 = rand(1,5);
+          particles.push({ x:tr.x, y:cy, vx:Math.cos(a2)*sp2, vy:Math.sin(a2)*sp2-2,
+                           life:rand(25,55), c: Math.random()<0.6 ? "#3e8e41" : "#6b4226", r:rand(2,5) });
+        }
       }
     }
   }
@@ -401,6 +469,7 @@ function startTurn(){
   const t = tanks[cur];
   t.fuel = CHASSIS[t.chassis].fuel; t.weapon = "normal";
   state = "AIM";
+  camGlide = 50;
   if(online){
     if(nextWindOverride !== null){ setWind(nextWindOverride); nextWindOverride = null; }
   } else newWind();
@@ -452,7 +521,7 @@ function showGameOver(winner){
 // ============ CPU ============
 function simShot(t, ang, pow){
   const v = pow*MAXPOW;
-  let p = { x: t.x + Math.cos(ang)*26, y: t.y-12 + Math.sin(ang)*26,
+  let p = { x: t.x + Math.cos(ang)*BARREL_L, y: t.y-TURRET_H + Math.sin(ang)*BARREL_L,
             vx: Math.cos(ang)*v, vy: Math.sin(ang)*v, age: 999, owner: null };
   for(let i=0;i<500;i++){
     const r = stepProj(p);
@@ -553,8 +622,8 @@ function sfxBoom(r){
 
 // ============ DESENHO ============
 function draw(){
-  ctx.setTransform(dpr,0,0,dpr,0,0);
-  if(shake > 0.5){ ctx.translate(rand(-shake,shake), rand(-shake,shake)); shake *= 0.85; }
+  ctx.setTransform(dpr*cam.z, 0, 0, dpr*cam.z, -cam.x*dpr*cam.z, -cam.y*dpr*cam.z);
+  if(shake > 0.5){ ctx.translate(rand(-shake,shake)/cam.z, rand(-shake,shake)/cam.z); shake *= 0.85; }
   // céu
   const sky = ctx.createLinearGradient(0,0,0,H);
   sky.addColorStop(0,"#7ec8f5"); sky.addColorStop(0.7,"#cfeaff"); sky.addColorStop(1,"#f5e9c8");
@@ -584,15 +653,16 @@ function draw(){
   for(let x=1;x<W;x++) ctx.lineTo(x, ground[x]);
   ctx.stroke();
 
+  drawTrees();
   for(const t of tanks) drawTank(t);
   drawAim();
 
   // projéteis
   for(const p of projectiles){
     ctx.fillStyle = p.weapon==="terra" ? "#6b4b2a" : (p.weapon==="pula" ? "#e67e22" : "#222");
-    ctx.beginPath(); ctx.arc(p.x, p.y, p.weapon==="big"?7:(p.weapon==="mini"?3.5:5), 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x, p.y, p.weapon==="big"?9:(p.weapon==="mini"?4.5:6.5), 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = "rgba(255,150,50,.6)";
-    ctx.beginPath(); ctx.arc(p.x-p.vx*0.7, p.y-p.vy*0.7, 3, 0, Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(p.x-p.vx*0.7, p.y-p.vy*0.7, 4, 0, Math.PI*2); ctx.fill();
   }
   // partículas
   for(const pt of particles){
@@ -602,7 +672,7 @@ function draw(){
   }
   ctx.globalAlpha = 1;
   // floaters
-  ctx.font = "bold 17px sans-serif"; ctx.textAlign = "center";
+  ctx.font = "bold 21px sans-serif"; ctx.textAlign = "center";
   for(const f of floaters){
     ctx.globalAlpha = clamp(f.life/40, 0, 1);
     ctx.fillStyle = f.c;
@@ -610,13 +680,37 @@ function draw(){
   }
   ctx.globalAlpha = 1;
 }
+function drawTrees(){
+  const tnow = Date.now()/700;
+  for(const tr of trees){
+    if(!tr.alive) continue;
+    const gy = groundAt(tr.x);
+    const sw = Math.sin(tnow + tr.sway) * 2.5; // balanço no vento (só visual)
+    ctx.strokeStyle = "#6b4226"; ctx.lineWidth = 7; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(tr.x, gy);
+    ctx.quadraticCurveTo(tr.x + sw*0.4, gy - tr.h*0.6, tr.x + sw, gy - tr.h + tr.r*0.4);
+    ctx.stroke();
+    ctx.fillStyle = "#3e8e41";
+    ctx.beginPath();
+    ctx.arc(tr.x + sw, gy - tr.h, tr.r, 0, Math.PI*2);
+    ctx.arc(tr.x + sw - tr.r*0.55, gy - tr.h + tr.r*0.35, tr.r*0.62, 0, Math.PI*2);
+    ctx.arc(tr.x + sw + tr.r*0.55, gy - tr.h + tr.r*0.35, tr.r*0.62, 0, Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle = "rgba(255,255,255,.14)";
+    ctx.beginPath(); ctx.arc(tr.x + sw - tr.r*0.3, gy - tr.h - tr.r*0.3, tr.r*0.45, 0, Math.PI*2); ctx.fill();
+    if(tr.hp < 55){ // machucada
+      ctx.fillStyle = "rgba(107,66,38,.35)";
+      ctx.beginPath(); ctx.arc(tr.x + sw, gy - tr.h, tr.r*(1 - tr.hp/55)*0.8, 0, Math.PI*2); ctx.fill();
+    }
+  }
+}
 function drawTank(t){
   if(!t.alive){
     // destroços
     ctx.save(); ctx.translate(t.x, groundAt(t.x));
     ctx.fillStyle = "#3a3a3a";
-    ctx.beginPath(); ctx.arc(0,-4,10,Math.PI,0); ctx.fill();
-    ctx.fillRect(-13,-5,26,5);
+    ctx.beginPath(); ctx.arc(0,-6,15,Math.PI,0); ctx.fill();
+    ctx.fillRect(-19,-7,38,7);
     ctx.restore();
     return;
   }
@@ -626,42 +720,42 @@ function drawTank(t){
   ctx.rotate(rot);
   // esteira (visual muda por chassi)
   ctx.fillStyle = "#2f2f2f";
-  rr(-17, -8, 34, 9, 4.5); ctx.fill();
+  rr(-25, -12, 50, 13, 6.5); ctx.fill();
   ctx.fillStyle = "#555";
   if(t.chassis === "rodoes"){
-    for(let i=-11;i<=11;i+=11){ ctx.beginPath(); ctx.arc(i,-4,4.2,0,Math.PI*2); ctx.fill(); }
+    for(let i=-16;i<=16;i+=16){ ctx.beginPath(); ctx.arc(i,-6,6.3,0,Math.PI*2); ctx.fill(); }
   } else {
-    for(let i=-12;i<=12;i+=6){ ctx.beginPath(); ctx.arc(i,-3.5,2.2,0,Math.PI*2); ctx.fill(); }
+    for(let i=-18;i<=18;i+=9){ ctx.beginPath(); ctx.arc(i,-5,3.3,0,Math.PI*2); ctx.fill(); }
   }
   // corpo
   ctx.fillStyle = t.color;
-  rr(-14, -15, 28, 9, 4); ctx.fill();
-  if(t.chassis === "blindado"){ ctx.strokeStyle = "#222"; ctx.lineWidth = 2.5; rr(-14,-15,28,9,4); ctx.stroke(); }
-  if(t.chassis === "turbo"){ ctx.fillStyle = "#222"; ctx.fillRect(t.x < W/2 ? -18 : 14, -19, 4, 6); }
+  rr(-21, -22, 42, 13, 6); ctx.fill();
+  if(t.chassis === "blindado"){ ctx.strokeStyle = "#222"; ctx.lineWidth = 3.5; rr(-21,-22,42,13,6); ctx.stroke(); }
+  if(t.chassis === "turbo"){ ctx.fillStyle = "#222"; ctx.fillRect(t.x < W/2 ? -27 : 21, -28, 6, 9); }
   ctx.restore();
   // torre + cano (sem rotação de inclinação, cano segue a mira)
   ctx.save();
-  ctx.translate(t.x, t.y-12);
+  ctx.translate(t.x, t.y-TURRET_H);
   ctx.fillStyle = t.color;
-  ctx.beginPath(); ctx.arc(0, -2, 7.5, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, -3, 11, 0, Math.PI*2); ctx.fill();
   ctx.rotate(t.aim.ang);
   ctx.fillStyle = "#333";
-  ctx.fillRect(0, -2.5, 26, 5);
+  ctx.fillRect(0, -3.5, BARREL_L, 7);
   ctx.restore();
   // antena com bandeirinha
   ctx.save();
-  ctx.translate(t.x, t.y-12);
-  ctx.strokeStyle = "#222"; ctx.lineWidth = 1.5;
-  ctx.beginPath(); ctx.moveTo(-6,-6); ctx.lineTo(-9,-22); ctx.stroke();
+  ctx.translate(t.x, t.y-TURRET_H);
+  ctx.strokeStyle = "#222"; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(-9,-9); ctx.lineTo(-13,-33); ctx.stroke();
   ctx.fillStyle = t.color;
-  ctx.beginPath(); ctx.moveTo(-9,-22); ctx.lineTo(-1,-19); ctx.lineTo(-9,-16); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-13,-33); ctx.lineTo(-1,-28); ctx.lineTo(-13,-24); ctx.closePath(); ctx.fill();
   ctx.restore();
   // indicador de vez
   if(tanks[cur] === t && state === "AIM"){
     ctx.fillStyle = "rgba(255,255,255,.9)";
     const bob = Math.sin(Date.now()/200)*3;
     ctx.beginPath();
-    ctx.moveTo(t.x, t.y-44+bob); ctx.lineTo(t.x-7, t.y-54+bob); ctx.lineTo(t.x+7, t.y-54+bob);
+    ctx.moveTo(t.x, t.y-62+bob); ctx.lineTo(t.x-9, t.y-75+bob); ctx.lineTo(t.x+9, t.y-75+bob);
     ctx.closePath(); ctx.fill();
   }
 }
@@ -676,27 +770,29 @@ function drawAim(){
   if(t.isCPU) return;
   // trajetória prevista (parcial — o resto é habilidade!)
   const a = t.aim.ang, v = t.aim.pow * MAXPOW;
-  let p = { x: t.x + Math.cos(a)*26, y: t.y-12 + Math.sin(a)*26,
+  let p = { x: t.x + Math.cos(a)*BARREL_L, y: t.y-TURRET_H + Math.sin(a)*BARREL_L,
             vx: Math.cos(a)*v, vy: Math.sin(a)*v, age: 999, owner: null };
-  ctx.fillStyle = "rgba(255,255,255,.85)";
-  for(let i=0;i<34;i++){
+  ctx.fillStyle = "rgba(25,30,42,.95)"; // mais escura p/ contraste no céu
+  for(let i=0;i<40;i++){   // ~15% mais longa
     const r = stepProj(p);
     if(r.hit || r.gone) break;
     if(i % 3 === 0){
-      ctx.globalAlpha = 0.9 - i*0.022;
-      ctx.beginPath(); ctx.arc(p.x, p.y, 3.4 - i*0.05, 0, Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 0.95 - i*0.017;
+      ctx.beginPath(); ctx.arc(p.x, p.y, 4.4 - i*0.05, 0, Math.PI*2); ctx.fill();
     }
   }
   ctx.globalAlpha = 1;
-  // elástico visual
-  ctx.strokeStyle = "rgba(255,255,255,.5)"; ctx.lineWidth = 2; ctx.setLineDash([6,6]);
-  ctx.beginPath(); ctx.moveTo(drag.sx, drag.sy); ctx.lineTo(drag.cx, drag.cy); ctx.stroke();
+  // elástico visual (drag guarda coords de tela → converte p/ mundo)
+  const ax = drag.sx/cam.z + cam.x, ay = drag.sy/cam.z + cam.y;
+  const bx = drag.cx/cam.z + cam.x, by = drag.cy/cam.z + cam.y;
+  ctx.strokeStyle = "rgba(255,255,255,.55)"; ctx.lineWidth = 2.5; ctx.setLineDash([6,6]);
+  ctx.beginPath(); ctx.moveTo(ax, ay); ctx.lineTo(bx, by); ctx.stroke();
   ctx.setLineDash([]);
   // medidor de força
   ctx.fillStyle = "rgba(10,20,35,.7)";
-  rr(t.x-32, t.y-78, 64, 10, 5); ctx.fill();
+  rr(t.x-38, t.y-96, 76, 13, 6); ctx.fill();
   ctx.fillStyle = t.aim.pow > 0.85 ? "#ff5540" : "#ffd23e";
-  rr(t.x-30, t.y-76, 60*t.aim.pow, 6, 3); ctx.fill();
+  rr(t.x-35, t.y-93, 70*t.aim.pow, 7, 3.5); ctx.fill();
 }
 
 // ============ LOOP ============
@@ -732,25 +828,55 @@ function tick(){
     const f = floaters[i]; f.y -= 0.7;
     if(--f.life <= 0) floaters.splice(i,1);
   }
+  // câmera: segue o projétil em voo; desliza até o tanque da vez no começo do turno
+  let camTarget = null;
+  if(state === "FLY" && projectiles.length) camTarget = { x: projectiles[0].x, y: projectiles[0].y };
+  else if(camGlide > 0){ camGlide--; const tc = tanks[cur]; camTarget = { x: tc.x, y: tc.y - 40 }; }
+  if(camTarget && cam.z > 1.01){
+    const vw = W/cam.z, vh = H/cam.z;
+    const tx = clamp(camTarget.x - vw/2, 0, W - vw), ty = clamp(camTarget.y - vh/2, 0, H - vh);
+    cam.x += (tx - cam.x)*0.12; cam.y += (ty - cam.y)*0.12;
+  }
   draw();
   requestAnimationFrame(tick);
 }
 
 // ============ ENTRADA ============
-function canvasPos(e){
+function screenPos(e){
   const r = cv.getBoundingClientRect();
   return { x: (e.clientX - r.left) * W / r.width, y: (e.clientY - r.top) * H / r.height };
 }
 cv.addEventListener("pointerdown", e => {
   audio();
-  if(!canAct()) return;
-  const p = canvasPos(e);
-  drag = { sx:p.x, sy:p.y, cx:p.x, cy:p.y };
+  const p = screenPos(e);
+  pointers.set(e.pointerId, p);
   cv.setPointerCapture(e.pointerId);
+  if(pointers.size >= 2){ drag = null; panDrag = null; pinchPrev = null; return; }
+  if(canAct()) drag = { sx:p.x, sy:p.y, cx:p.x, cy:p.y };
+  else panDrag = { x:p.x, y:p.y };  // fora da sua vez, 1 dedo passeia a câmera
 });
 cv.addEventListener("pointermove", e => {
+  if(!pointers.has(e.pointerId)) return;
+  const p = screenPos(e);
+  pointers.set(e.pointerId, p);
+  if(pointers.size === 2){
+    // pinça: zoom + pan
+    const [a, b] = [...pointers.values()];
+    const dist = Math.hypot(a.x-b.x, a.y-b.y), mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+    if(pinchPrev){
+      zoomAt(mx, my, dist/(pinchPrev.dist || 1));
+      cam.x -= (mx-pinchPrev.mx)/cam.z; cam.y -= (my-pinchPrev.my)/cam.z;
+      clampCam();
+    }
+    pinchPrev = { dist, mx, my };
+    return;
+  }
+  if(panDrag){
+    cam.x -= (p.x-panDrag.x)/cam.z; cam.y -= (p.y-panDrag.y)/cam.z;
+    clampCam(); panDrag = { x:p.x, y:p.y };
+    return;
+  }
   if(!drag) return;
-  const p = canvasPos(e);
   drag.cx = p.x; drag.cy = p.y;
   const dx = drag.sx - drag.cx, dy = drag.sy - drag.cy;
   const d = Math.hypot(dx,dy);
@@ -760,14 +886,25 @@ cv.addEventListener("pointermove", e => {
     t.aim.pow = clamp(d/MAXDRAG, 0.12, 1);
   }
 });
+function endPointer(e){
+  pointers.delete(e.pointerId);
+  if(pointers.size < 2) pinchPrev = null;
+  if(pointers.size === 0) panDrag = null;
+}
 cv.addEventListener("pointerup", e => {
+  endPointer(e);
   if(!drag) return;
   const dx = drag.sx - drag.cx, dy = drag.sy - drag.cy;
   const d = Math.hypot(dx,dy);
   drag = null;
   if(d > 22 && canAct()) fireLocal();
 });
-cv.addEventListener("pointercancel", () => { drag = null; });
+cv.addEventListener("pointercancel", e => { endPointer(e); drag = null; });
+cv.addEventListener("wheel", e => {
+  e.preventDefault();
+  const r = cv.getBoundingClientRect();
+  zoomAt((e.clientX-r.left)*W/r.width, (e.clientY-r.top)*H/r.height, e.deltaY < 0 ? 1.12 : 1/1.12);
+}, { passive:false });
 
 for(const [id,dir] of [["btnL",-1],["btnR",1]]){
   const b = document.getElementById(id);
@@ -932,6 +1069,7 @@ function sendSync(){
   sendMsg({ type:"sync", wind:w,
             hp: tanks.map(t => t.hp),
             xs: tanks.map(t => Math.round(t.x*10)/10),
+            tr: trees.map(t => t.alive ? Math.round(t.hp) : 0),
             g: Array.from(ground, v => Math.round(v*10)) });
 }
 function applySync(m){
@@ -940,9 +1078,19 @@ function applySync(m){
     t.hp = m.hp[i]; t.x = m.xs[i];
     t.y = groundAt(t.x); t.vy = 0; t.fallFrom = null;
   });
+  if(m.tr) trees.forEach((t,i) => { t.hp = m.tr[i]; if(m.tr[i] <= 0) t.alive = false; });
   nextWindOverride = m.wind;
   updateHP();
 }
+document.getElementById("btnfs").addEventListener("click", () => {
+  audio();
+  const el = document.documentElement;
+  if(document.fullscreenElement || document.webkitFullscreenElement){
+    (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+  } else if(el.requestFullscreen) el.requestFullscreen();
+  else if(el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+  else toast("📱 No iPhone: botão Compartilhar → 'Adicionar à Tela de Início' = tela cheia!", 3800);
+});
 document.getElementById("btnonline").addEventListener("click", () => {
   audio();
   document.getElementById("menu").classList.add("hidden");
