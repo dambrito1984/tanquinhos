@@ -216,6 +216,7 @@ let camGlide = 0;          // frames seguindo o tanque da vez
 let pointers = new Map();  // dedos na tela (p/ pinça)
 let pinchPrev = null, panDrag = null;
 let trees = [];            // árvores destrutíveis
+let decor = [];            // gramíneas, arbustos, flores (sem colisão)
 // online
 let online = false, isHost = false, myIndex = 0, peer = null, conn = null;
 let lastShooter = 0, pendingSync = null, nextWindOverride = null, lastMoveSent = 0;
@@ -266,13 +267,82 @@ function genTerrain(){
   // árvores salteadas (fora das áreas de nascimento, com espaço entre elas)
   trees = [];
   let tries = 0;
-  while(trees.length < 4 && tries++ < 60){
-    const x = rand(180, W-180);
+  const nTrees = 3 + Math.floor(rand(0, 3));
+  while(trees.length < nTrees && tries++ < 120){
+    const x = rand(170, W-170);
     if(Math.abs(x-110) < 150 || Math.abs(x-(W-110)) < 150) continue;
-    if(trees.some(tr => Math.abs(tr.x-x) < 95)) continue;
-    trees.push({ x, h: rand(50,74), r: rand(20,28), hp: 55, alive: true, sway: rand(0,Math.PI*2) });
+    if(trees.some(tr => Math.abs(tr.x-x) < 88)) continue;
+    trees.push(makeTree(x));
   }
+  genDecor();
   cam.x = 0; cam.y = 0; cam.z = 1;
+}
+const TREE_KINDS = ["redonda","redonda","pinheiro","alta","larga"]; // redonda um pouco mais comum
+function makeTree(x){
+  const kind = TREE_KINDS[Math.floor(rand(0, TREE_KINDS.length))];
+  const sc = rand(0.94, 1.1);
+  const t = { x, kind, alive:true, sway: rand(0, Math.PI*2), lean: rand(-0.08, 0.08),
+              hue: Math.round(rand(104, 122)), sat: Math.round(rand(42, 50)), lit: Math.round(rand(30, 37)),
+              trunkLit: Math.round(rand(28, 34)),
+              fruit: rng() < 0.22 ? "#e74c3c" : null };
+  if(kind === "pinheiro"){ t.h = rand(72, 86)*sc; t.r = rand(20, 24)*sc; t.cy = t.h*0.72; t.cr = t.r*1.15; }
+  else if(kind === "alta"){ t.h = rand(80, 94)*sc; t.r = rand(17, 20)*sc; t.cy = t.h - t.r*0.2; t.cr = t.r; }
+  else if(kind === "larga"){ t.h = rand(46, 54)*sc; t.r = rand(28, 33)*sc; t.cy = t.h; t.cr = t.r*1.05; }
+  else { t.h = rand(58, 70)*sc; t.r = rand(22, 26)*sc; t.cy = t.h; t.cr = t.r; }
+  t.hpMax = Math.round(34 + t.r*1.5);
+  t.hp = t.hpMax;
+  return t;
+}
+
+// ---- vegetação decorativa (sem colisão, só ambientação) ----
+function genDecor(){
+  decor = [];
+  let x = rand(8, 18);
+  while(x < W-6){
+    const roll = rng();
+    if(roll < 0.58)      decor.push(mkGrama(x));   // grama domina; o resto pontua o cenário
+    else if(roll < 0.73) decor.push(mkArbusto(x));
+    else if(roll < 0.85) decor.push(mkFlor(x));
+    else if(roll < 0.93) decor.push(mkPedra(x));
+    else                 decor.push(mkJunco(x));
+    // touceiras: tufos extras bem juntinhos
+    if(rng() < 0.3){
+      const n = 1 + Math.floor(rand(0, 2));
+      for(let i=0;i<n;i++) decor.push(mkGrama(x + rand(-10, 10)));
+    }
+    x += rand(14, 26);
+  }
+}
+// paleta enxuta: variação sutil, mantendo o cenário coeso
+const VERDES = ["#4a9b4e", "#3e8e41", "#57a851", "#46903f"];
+function vGreen(){ return VERDES[Math.floor(rand(0, VERDES.length))]; }
+function mkGrama(x){
+  const n = 4 + Math.floor(rand(0, 2)), hBase = rand(10, 15), blades = [];
+  for(let i=0;i<n;i++){
+    const sp = rand(-6, 6);
+    blades.push({ x0: sp*0.3, tx: sp, h: hBase*rand(0.8, 1.12), f: rand(0.7, 1.1) });
+  }
+  return { t:"grama", x, blades, c: vGreen(), w: rand(1.9, 2.3), sway: rand(0, Math.PI*2) };
+}
+function mkArbusto(x){
+  const n = 3, r0 = rand(9, 13), balls = [];
+  for(let i=0;i<n;i++) balls.push({ dx: rand(-r0*0.9, r0*0.9), dy: rand(-r0*0.35, 0), r: r0*rand(0.72, 1) });
+  return { t:"arbusto", x, balls, c: vGreen(),
+           berry: rng() < 0.28 ? "#e05c5c" : null, sway: rand(0, Math.PI*2) };
+}
+function mkFlor(x){
+  const cores = ["#ffffff", "#ffd93e", "#ff8fb1"];
+  return { t:"flor", x, h: rand(11, 16), c: cores[Math.floor(rand(0, cores.length))],
+           petals: 5, pr: rand(2.2, 2.8), lean: rand(-2, 2), sway: rand(0, Math.PI*2) };
+}
+function mkPedra(x){
+  return { t:"pedra", x, rx: rand(4.5, 7.5), ry: rand(3, 4.8),
+           c: rng() < 0.5 ? "#9aa5ad" : "#8d979f", rot: rand(-0.3, 0.3) };
+}
+function mkJunco(x){
+  const n = 3, stems = [];
+  for(let i=0;i<n;i++) stems.push({ dx: rand(-4, 4), h: rand(21, 30), tip: rng() < 0.5 });
+  return { t:"junco", x, stems, c: "#7d9b45", sway: rand(0, Math.PI*2) };
 }
 function flattenAt(cx){
   const y = ground[cx|0];
@@ -345,7 +415,7 @@ function stepProj(p){
     if(p.x < -60 || p.x > W+60) return {gone:true};
     for(const tr of trees){
       if(!tr.alive) continue;
-      if(Math.hypot(p.x-tr.x, p.y-(groundAt(tr.x)-tr.h)) < tr.r) return {hit:true};
+      if(Math.hypot(p.x-tr.x, p.y-(groundAt(tr.x)-tr.cy)) < tr.cr) return {hit:true};
     }
     if(p.y >= groundAt(p.x)){
       if(p.weapon === "pula" && (p.bounces||0) < 2){
@@ -427,9 +497,9 @@ function explode(x, y, wkey, owner){
   // dano nas árvores
   for(const tr of trees){
     if(!tr.alive) continue;
-    const cy = groundAt(tr.x) - tr.h;
+    const cy = groundAt(tr.x) - tr.cy;
     const dt = Math.hypot(tr.x-x, cy-y);
-    const reach = wp.r*1.6 + tr.r;
+    const reach = wp.r*1.6 + tr.cr;
     if(dt < reach){
       tr.hp -= wp.dmg * (1 - dt/reach*0.5);
       if(tr.hp <= 0){
@@ -437,10 +507,15 @@ function explode(x, y, wkey, owner){
         for(let i=0;i<24;i++){
           const a2 = rand(0,Math.PI*2), sp2 = rand(1,5);
           particles.push({ x:tr.x, y:cy, vx:Math.cos(a2)*sp2, vy:Math.sin(a2)*sp2-2,
-                           life:rand(25,55), c: Math.random()<0.6 ? "#3e8e41" : "#6b4226", r:rand(2,5) });
+                           life:rand(25,55), c: Math.random()<0.6 ? `hsl(${tr.hue} ${tr.sat}% ${tr.lit}%)` : "#6b4226", r:rand(2,5) });
         }
       }
     }
+  }
+  // vegetação rasteira some na explosão
+  for(const d of decor){
+    if(d.dead) continue;
+    if(Math.hypot(d.x-x, (groundAt(d.x)-8)-y) < wp.r*1.25) d.dead = true;
   }
   if(wkey === "cluster"){
     for(let i=0;i<4;i++){
@@ -653,6 +728,7 @@ function draw(){
   for(let x=1;x<W;x++) ctx.lineTo(x, ground[x]);
   ctx.stroke();
 
+  drawDecor();
   drawTrees();
   for(const t of tanks) drawTank(t);
   drawAim();
@@ -680,28 +756,136 @@ function draw(){
   }
   ctx.globalAlpha = 1;
 }
+function blob(x, y, r){ ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill(); }
 function drawTrees(){
   const tnow = Date.now()/700;
   for(const tr of trees){
     if(!tr.alive) continue;
     const gy = groundAt(tr.x);
-    const sw = Math.sin(tnow + tr.sway) * 2.5; // balanço no vento (só visual)
-    ctx.strokeStyle = "#6b4226"; ctx.lineWidth = 7; ctx.lineCap = "round";
+    const sw = Math.sin(tnow + tr.sway)*2.5 + wind*70; // balanço (só visual)
+    const lean = tr.lean * tr.h * 0.35;
+    const tx = tr.x + lean + sw;              // topo do tronco
+    const green = `hsl(${tr.hue} ${tr.sat}% ${tr.lit}%)`;
+    const greenLo = `hsl(${tr.hue} ${tr.sat}% ${Math.max(14, tr.lit-9)}%)`;
+    // tronco
+    ctx.strokeStyle = `hsl(26 36% ${tr.trunkLit}%)`;
+    ctx.lineWidth = Math.max(4.5, tr.r*0.3); ctx.lineCap = "round";
     ctx.beginPath(); ctx.moveTo(tr.x, gy);
-    ctx.quadraticCurveTo(tr.x + sw*0.4, gy - tr.h*0.6, tr.x + sw, gy - tr.h + tr.r*0.4);
+    const trunkTop = gy - tr.h + (tr.kind === "pinheiro" ? tr.h*0.12 : tr.r*0.35);
+    ctx.quadraticCurveTo(tr.x + lean*0.35 + sw*0.35, gy - tr.h*0.55, tx, trunkTop);
     ctx.stroke();
-    ctx.fillStyle = "#3e8e41";
-    ctx.beginPath();
-    ctx.arc(tr.x + sw, gy - tr.h, tr.r, 0, Math.PI*2);
-    ctx.arc(tr.x + sw - tr.r*0.55, gy - tr.h + tr.r*0.35, tr.r*0.62, 0, Math.PI*2);
-    ctx.arc(tr.x + sw + tr.r*0.55, gy - tr.h + tr.r*0.35, tr.r*0.62, 0, Math.PI*2);
-    ctx.fill();
-    ctx.fillStyle = "rgba(255,255,255,.14)";
-    ctx.beginPath(); ctx.arc(tr.x + sw - tr.r*0.3, gy - tr.h - tr.r*0.3, tr.r*0.45, 0, Math.PI*2); ctx.fill();
-    if(tr.hp < 55){ // machucada
-      ctx.fillStyle = "rgba(107,66,38,.35)";
-      ctx.beginPath(); ctx.arc(tr.x + sw, gy - tr.h, tr.r*(1 - tr.hp/55)*0.8, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = green;
+    if(tr.kind === "pinheiro"){
+      // 3 saias de agulhas empilhadas
+      for(let i=0;i<3;i++){
+        const f = i/2;                        // 0 (base) → 1 (topo)
+        const cyT = gy - tr.h*(0.42 + f*0.52);
+        const halfW = tr.r*(1.25 - f*0.5), hT = tr.h*0.3;
+        const sx = tr.x + lean*(0.4 + f*0.6) + sw*(0.4 + f*0.6);
+        ctx.fillStyle = i === 1 ? greenLo : green;
+        ctx.beginPath();
+        ctx.moveTo(sx, cyT - hT); ctx.lineTo(sx + halfW, cyT); ctx.lineTo(sx - halfW, cyT);
+        ctx.closePath(); ctx.fill();
+      }
+    } else if(tr.kind === "alta"){
+      const cy2 = gy - tr.cy;
+      blob(tx, cy2, tr.r);
+      blob(tx - tr.r*0.5, cy2 + tr.r*0.55, tr.r*0.58);
+      ctx.fillStyle = greenLo;
+      blob(tx + tr.r*0.52, cy2 + tr.r*0.5, tr.r*0.52);
+    } else if(tr.kind === "larga"){
+      const cy2 = gy - tr.h;
+      blob(tx, cy2, tr.r*0.82);
+      blob(tx - tr.r*0.72, cy2 + tr.r*0.2, tr.r*0.62);
+      blob(tx + tr.r*0.72, cy2 + tr.r*0.18, tr.r*0.66);
+      ctx.fillStyle = greenLo;
+      blob(tx - tr.r*0.3, cy2 + tr.r*0.5, tr.r*0.55);
+      blob(tx + tr.r*0.34, cy2 + tr.r*0.52, tr.r*0.5);
+    } else {
+      const cy2 = gy - tr.h;
+      blob(tx, cy2, tr.r);
+      blob(tx - tr.r*0.55, cy2 + tr.r*0.35, tr.r*0.62);
+      ctx.fillStyle = greenLo;
+      blob(tx + tr.r*0.55, cy2 + tr.r*0.35, tr.r*0.62);
     }
+    // brilho do sol na copa
+    if(tr.kind !== "pinheiro"){
+      ctx.fillStyle = "rgba(255,255,255,.14)";
+      blob(tx - tr.r*0.3, gy - tr.cy - tr.r*0.32, tr.r*0.42);
+    }
+    // frutinhas
+    if(tr.fruit){
+      ctx.fillStyle = tr.fruit;
+      for(let i=0;i<4;i++){
+        const a = tr.sway + i*1.9;
+        blob(tx + Math.cos(a)*tr.r*0.6, gy - tr.cy + Math.sin(a)*tr.r*0.5, 2.3);
+      }
+    }
+    if(tr.hp < tr.hpMax){ // machucada: folhagem vai ficando rala
+      ctx.fillStyle = "rgba(107,66,38,.32)";
+      blob(tx, gy - tr.cy, tr.cr*(1 - tr.hp/tr.hpMax)*0.85);
+    }
+  }
+}
+function drawDecor(){
+  const tnow = Date.now()/900;
+  for(const d of decor){
+    if(d.dead) continue;
+    const gy = groundAt(d.x);
+    if(gy > H-5) continue;
+    const sl = slopeAngle(d.x);
+    if(Math.abs(sl) > 1.25) continue;   // barranco quase vertical fica pelado (cratera "raspa" o mato)
+    const sw = Math.sin(tnow + d.sway)*1.7 + wind*45;
+    ctx.save();
+    ctx.translate(d.x, gy + 1);
+    ctx.rotate(clamp(sl*0.42, -0.45, 0.45));  // acompanha o morro, mas cresce para cima
+    if(d.t === "grama"){
+      ctx.strokeStyle = d.c; ctx.lineWidth = d.w; ctx.lineCap = "round";
+      for(const b of d.blades){
+        ctx.beginPath(); ctx.moveTo(b.x0, 0);
+        ctx.quadraticCurveTo(b.x0 + (b.tx-b.x0)*0.4, -b.h*0.62, b.tx + sw*b.f, -b.h);
+        ctx.stroke();
+      }
+    } else if(d.t === "arbusto"){
+      ctx.fillStyle = d.c;
+      for(const b of d.balls) blob(b.dx + sw*0.25, b.dy - b.r*0.55, b.r);
+      ctx.fillStyle = "rgba(255,255,255,.13)";
+      const b0 = d.balls[0];
+      blob(b0.dx - b0.r*0.3 + sw*0.25, b0.dy - b0.r*0.95, b0.r*0.42);
+      if(d.berry){
+        ctx.fillStyle = d.berry;
+        for(const b of d.balls) blob(b.dx + sw*0.25 + b.r*0.3, b.dy - b.r*0.75, 1.7);
+      }
+    } else if(d.t === "flor"){
+      ctx.strokeStyle = "#5f8f3e"; ctx.lineWidth = 1.6; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(0, 0);
+      ctx.quadraticCurveTo(d.lean*0.5, -d.h*0.6, d.lean + sw, -d.h); ctx.stroke();
+      const fx = d.lean + sw, fy = -d.h;
+      ctx.fillStyle = d.c;
+      for(let i=0;i<d.petals;i++){
+        const a = i/d.petals*Math.PI*2;
+        blob(fx + Math.cos(a)*d.pr, fy + Math.sin(a)*d.pr, d.pr);
+      }
+      ctx.fillStyle = "#ffd23e";
+      blob(fx, fy, d.pr*0.6);
+    } else if(d.t === "pedra"){
+      ctx.rotate(d.rot);
+      ctx.fillStyle = d.c;
+      ctx.beginPath(); ctx.ellipse(0, -d.ry*0.75, d.rx, d.ry, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.22)";
+      ctx.beginPath(); ctx.ellipse(-d.rx*0.25, -d.ry*1.08, d.rx*0.4, d.ry*0.38, 0, 0, Math.PI*2); ctx.fill();
+    } else if(d.t === "junco"){
+      ctx.strokeStyle = d.c; ctx.lineWidth = 2; ctx.lineCap = "round";
+      for(const s of d.stems){
+        ctx.beginPath(); ctx.moveTo(s.dx, 0);
+        ctx.quadraticCurveTo(s.dx, -s.h*0.6, s.dx + sw*1.4, -s.h); ctx.stroke();
+        if(s.tip){
+          ctx.fillStyle = "#a97b4a";
+          ctx.beginPath(); ctx.ellipse(s.dx + sw*1.4, -s.h - 2.5, 2.1, 4.8, 0, 0, Math.PI*2); ctx.fill();
+        }
+      }
+    }
+    ctx.restore();
   }
 }
 function drawTank(t){
