@@ -238,6 +238,10 @@ let pointers = new Map();  // dedos na tela (p/ pinça)
 let pinchPrev = null, panDrag = null;
 let trees = [];            // árvores destrutíveis
 let decor = [];            // gramíneas, arbustos, flores (sem colisão)
+let birds = [];            // passarinhos que fogem das árvores derrubadas
+// esquadrilha de 3 caças: um único sobrevoo por partida
+let squad = null, squadAt = 0, squadDone = false, squadDelay = 0, squadDir = 1, squadY = 90;
+const FORMACAO = [ {dx:0, dy:0}, {dx:-40, dy:-21}, {dx:-40, dy:21} ];   // V clássico
 // online
 let online = false, isHost = false, myIndex = 0, peer = null, conn = null;
 let lastShooter = 0, pendingSync = null, nextWindOverride = null, lastMoveSent = 0;
@@ -300,8 +304,13 @@ function genTerrain(){
     trees.push(makeTree(x));
   }
   genDecor();
+  // sobrevoo da esquadrilha: hora sorteada (mesmo momento nos 2 aparelhos)
+  squadDelay = rand(10000, 70000);
+  squadDir = rng() < 0.5 ? 1 : -1;
+  squadY = rand(45, 145);
   cam.x = 0; cam.y = 0; cam.z = 1;
 }
+function armSquad(){ squadAt = Date.now() + squadDelay; squadDone = false; squad = null; }
 const TREE_KINDS = ["redonda","redonda","pinheiro","alta","larga"]; // redonda um pouco mais comum
 function makeTree(x){
   const kind = TREE_KINDS[Math.floor(rand(0, TREE_KINDS.length))];
@@ -316,6 +325,8 @@ function makeTree(x){
   else { t.h = rand(58, 70)*sc; t.r = rand(22, 26)*sc; t.cy = t.h; t.cr = t.r; }
   t.hpMax = Math.round(34 + t.r*1.5);
   t.hp = t.hpMax;
+  t.stumpH = t.h * rand(0.17, 0.28);          // quanto do tronco sobra em pé se ela cair
+  t.stumpSeed = rand(0, 100);                 // formato fixo da quebra
   return t;
 }
 
@@ -531,19 +542,24 @@ function explode(x, y, wkey, owner){
   }
   // dano nas árvores
   for(const tr of trees){
-    if(!tr.alive) continue;
+    if(!tr.alive){   // explosão em cima do toco leva o resto do tronco embora
+      if(tr.stump && Math.hypot(tr.x-x, (groundAt(tr.x)-10)-y) < wp.r*1.1) tr.stump = false;
+      continue;
+    }
     const cy = groundAt(tr.x) - tr.cy;
     const dt = Math.hypot(tr.x-x, cy-y);
     const reach = wp.r*1.6 + tr.cr;
     if(dt < reach){
       tr.hp -= wp.dmg * (1 - dt/reach*0.5);
       if(tr.hp <= 0){
-        tr.alive = false;
+        tr.alive = false; tr.stump = true;
         for(let i=0;i<24;i++){
           const a2 = rand(0,Math.PI*2), sp2 = rand(1,5);
           particles.push({ x:tr.x, y:cy, vx:Math.cos(a2)*sp2, vy:Math.sin(a2)*sp2-2,
                            life:rand(25,55), c: Math.random()<0.6 ? `hsl(${tr.hue} ${tr.sat}% ${tr.lit}%)` : "#6b4226", r:rand(2,5) });
         }
+        // metade das árvores tinha ninho: os moradores fogem voando
+        if(Math.random() < 0.5) spawnBirds(tr.x, cy, 3 + Math.floor(Math.random()*3));
       }
     }
   }
@@ -558,6 +574,15 @@ function explode(x, y, wkey, owner){
     }
   }
   updateHP();
+}
+function spawnBirds(x, y, n){
+  for(let i=0;i<n;i++){
+    birds.push({ x: x + rand(-14, 14), y: y + rand(-12, 6),
+                 vx: rand(-2.4, 2.4) + (Math.random()<0.5?-1:1)*0.8,
+                 vy: rand(-2.8, -1.3), flap: rand(0, Math.PI*2),
+                 size: rand(0.75, 1.35), life: 420 });
+  }
+  sfxBirds();
 }
 function buildMound(cx, r){
   const x0 = Math.max(0, Math.ceil(cx-r)), x1 = Math.min(W-1, Math.floor(cx+r));
@@ -781,6 +806,41 @@ function sfxFire(){
     o.connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime+0.22);
   }catch(e){}
 }
+function sfxJets(){   // ronco dos caças passando (grave, vai e volta)
+  try{
+    const ac = audio(), dur = 3.4;
+    const buf = ac.createBuffer(1, ac.sampleRate*dur, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for(let i=0;i<d.length;i++) d[i] = Math.random()*2-1;
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = "bandpass"; f.Q.value = 0.8;
+    f.frequency.setValueAtTime(160, ac.currentTime);
+    f.frequency.linearRampToValueAtTime(520, ac.currentTime + dur*0.45);
+    f.frequency.linearRampToValueAtTime(120, ac.currentTime + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(0.001, ac.currentTime);
+    g.gain.linearRampToValueAtTime(0.14, ac.currentTime + dur*0.45);
+    g.gain.linearRampToValueAtTime(0.001, ac.currentTime + dur);
+    src.connect(f).connect(g).connect(ac.destination); src.start();
+  }catch(e){}
+}
+function sfxBirds(){
+  try{
+    const ac = audio();
+    for(let i=0;i<5;i++){
+      const d = i*0.07 + Math.random()*0.05;
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type = "sine";
+      const f0 = 1900 + Math.random()*900;
+      o.frequency.setValueAtTime(f0, ac.currentTime + d);
+      o.frequency.exponentialRampToValueAtTime(f0*1.5, ac.currentTime + d + 0.05);
+      g.gain.setValueAtTime(0.001, ac.currentTime + d);
+      g.gain.exponentialRampToValueAtTime(0.045, ac.currentTime + d + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + d + 0.08);
+      o.connect(g).connect(ac.destination); o.start(ac.currentTime + d); o.stop(ac.currentTime + d + 0.1);
+    }
+  }catch(e){}
+}
 function sfxRepair(){
   try{
     const ac = audio();
@@ -836,6 +896,7 @@ function draw(){
     ctx.arc(c.x-20*c.s, c.y+5*c.s, 13*c.s, 0, Math.PI*2);
     ctx.fill();
   }
+  drawSquad();
   // terreno
   const dirt = ctx.createLinearGradient(0, H*0.3, 0, H);
   dirt.addColorStop(0,"#8a6238"); dirt.addColorStop(1,"#5b3d22");
@@ -851,6 +912,7 @@ function draw(){
 
   drawDecor();
   drawTrees();
+  drawBirds();
   for(const t of tanks) drawTank(t);
   drawAim();
 
@@ -878,10 +940,68 @@ function draw(){
   ctx.globalAlpha = 1;
 }
 function blob(x, y, r){ ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill(); }
+function drawBirds(){
+  ctx.strokeStyle = "#33404f"; ctx.lineCap = "round";
+  for(const b of birds){
+    const asa = 7.5*b.size, alt = Math.sin(b.flap)*4.5*b.size;
+    ctx.globalAlpha = clamp(b.life/70, 0, 1);
+    ctx.lineWidth = 2*b.size;
+    ctx.beginPath();
+    ctx.moveTo(b.x - asa, b.y);
+    ctx.quadraticCurveTo(b.x - asa*0.45, b.y - alt - 2.5*b.size, b.x, b.y);
+    ctx.quadraticCurveTo(b.x + asa*0.45, b.y - alt - 2.5*b.size, b.x + asa, b.y);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+}
+function drawSquad(){
+  if(!squad) return;
+  // rastros
+  ctx.fillStyle = "rgba(255,255,255,.55)";
+  for(const s of squad.smoke){
+    ctx.globalAlpha = clamp(s.life/80, 0, 1)*0.5;
+    blob(s.x, s.y, s.r);
+  }
+  ctx.globalAlpha = 1;
+  for(const f of FORMACAO){
+    ctx.save();
+    ctx.translate(squad.x + squad.dir*f.dx, squad.y + f.dy);
+    ctx.scale(squad.dir, 1);        // nariz apontado para onde voa
+    drawJet();
+    ctx.restore();
+  }
+}
+function drawJet(){
+  // asas em delta
+  ctx.fillStyle = "#4f5a66";
+  ctx.beginPath(); ctx.moveTo(4,0); ctx.lineTo(-13,13); ctx.lineTo(-5,13); ctx.lineTo(10,1.5); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(4,0); ctx.lineTo(-13,-13); ctx.lineTo(-5,-13); ctx.lineTo(10,-1.5); ctx.closePath(); ctx.fill();
+  // estabilizadores da cauda
+  ctx.fillStyle = "#3f4954";
+  ctx.beginPath(); ctx.moveTo(-11,0); ctx.lineTo(-19,-9); ctx.lineTo(-11,-2); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(-11,0); ctx.lineTo(-19,7); ctx.lineTo(-11,1.5); ctx.closePath(); ctx.fill();
+  // fuselagem afilada
+  ctx.fillStyle = "#78848f";
+  ctx.beginPath();
+  ctx.moveTo(21,0); ctx.lineTo(9,-3.4); ctx.lineTo(-15,-3.2);
+  ctx.lineTo(-15,3.2); ctx.lineTo(9,3.4); ctx.closePath(); ctx.fill();
+  // brilho superior
+  ctx.fillStyle = "rgba(255,255,255,.22)";
+  ctx.beginPath(); ctx.moveTo(19,-0.4); ctx.lineTo(8,-2.6); ctx.lineTo(-14,-2.4); ctx.lineTo(-14,-1); ctx.closePath(); ctx.fill();
+  // cabine
+  ctx.fillStyle = "#22303d";
+  ctx.beginPath(); ctx.ellipse(9, -1.6, 4.6, 2.3, 0, 0, Math.PI*2); ctx.fill();
+  // fogo da turbina
+  const f2 = 5 + Math.random()*4;
+  ctx.fillStyle = "rgba(255,168,60,.9)";
+  ctx.beginPath(); ctx.moveTo(-15,-2.4); ctx.lineTo(-15-f2, 0); ctx.lineTo(-15, 2.4); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "rgba(255,240,180,.9)";
+  ctx.beginPath(); ctx.moveTo(-15,-1.2); ctx.lineTo(-15-f2*0.5, 0); ctx.lineTo(-15, 1.2); ctx.closePath(); ctx.fill();
+}
 function drawTrees(){
   const tnow = Date.now()/700;
   for(const tr of trees){
-    if(!tr.alive) continue;
+    if(!tr.alive){ if(tr.stump) drawStump(tr); continue; }
     const gy = groundAt(tr.x);
     const sw = Math.sin(tnow + tr.sway)*2.5 + wind*70; // balanço (só visual)
     const lean = tr.lean * tr.h * 0.35;
@@ -947,6 +1067,39 @@ function drawTrees(){
       blob(tx, gy - tr.cy, tr.cr*(1 - tr.hp/tr.hpMax)*0.85);
     }
   }
+}
+// o que sobra da árvore derrubada: tronco lascado, queimado no topo
+function drawStump(tr){
+  const gy = groundAt(tr.x);
+  if(gy > H-3) return;
+  const h = tr.stumpH, w = Math.max(5, tr.r*0.32);
+  const j = Math.sin(tr.stumpSeed) * w*0.25;   // lascas sempre no mesmo formato
+  ctx.fillStyle = `hsl(26 36% ${tr.trunkLit}%)`;
+  ctx.beginPath();
+  ctx.moveTo(tr.x - w*0.55, gy);
+  ctx.lineTo(tr.x - w*0.5,  gy - h*0.92);
+  ctx.lineTo(tr.x - w*0.2,  gy - h*0.62 - j);   // dente da quebra
+  ctx.lineTo(tr.x + w*0.05, gy - h - j*0.6);    // lasca alta
+  ctx.lineTo(tr.x + w*0.3,  gy - h*0.7 + j);
+  ctx.lineTo(tr.x + w*0.52, gy - h*0.88);
+  ctx.lineTo(tr.x + w*0.55, gy);
+  ctx.closePath(); ctx.fill();
+  // rachadura descendo pelo tronco
+  ctx.strokeStyle = "rgba(0,0,0,.4)"; ctx.lineWidth = 1.5; ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(tr.x + w*0.02, gy - h*0.86);
+  ctx.lineTo(tr.x - w*0.12, gy - h*0.5);
+  ctx.lineTo(tr.x + w*0.08, gy - h*0.22);
+  ctx.stroke();
+  // topo chamuscado
+  ctx.strokeStyle = "rgba(35,20,10,.55)"; ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(tr.x - w*0.46, gy - h*0.88);
+  ctx.lineTo(tr.x - w*0.18, gy - h*0.6 - j);
+  ctx.lineTo(tr.x + w*0.05, gy - h - j*0.6);
+  ctx.lineTo(tr.x + w*0.3,  gy - h*0.68 + j);
+  ctx.lineTo(tr.x + w*0.5,  gy - h*0.86);
+  ctx.stroke();
 }
 function drawDecor(){
   const tnow = Date.now()/900;
@@ -1155,6 +1308,32 @@ function tick(){
     const f = floaters[i]; f.y -= 0.7;
     if(--f.life <= 0) floaters.splice(i,1);
   }
+  // passarinhos: sobem batendo asa e somem no alto
+  for(let i=birds.length-1;i>=0;i--){
+    const b = birds[i];
+    b.x += b.vx; b.y += b.vy;
+    b.vy -= 0.007; b.vx *= 1.002; b.flap += 0.34;
+    if(--b.life <= 0 || b.y < -50 || b.x < -70 || b.x > W+70) birds.splice(i,1);
+  }
+  // sobrevoo da esquadrilha
+  if(!squadDone && state !== "MENU" && Date.now() >= squadAt){
+    squad = { x: squadDir > 0 ? -140 : W+140, y: squadY, vx: squadDir*rand(3.2, 4.4), dir: squadDir, smoke: [] };
+    squadDone = true;
+    sfxJets();
+  }
+  if(squad){
+    squad.x += squad.vx;
+    for(const f of FORMACAO){                       // cada caça deixa seu rastro
+      if(Math.random() < 0.5)
+        squad.smoke.push({ x: squad.x + squad.dir*(f.dx - 18), y: squad.y + f.dy, r: rand(1.6, 2.6), life: 80 });
+    }
+    for(let i=squad.smoke.length-1;i>=0;i--){
+      const s = squad.smoke[i];
+      s.r += 0.09; s.y -= 0.03;
+      if(--s.life <= 0) squad.smoke.splice(i,1);
+    }
+    if(squad.x < -260 || squad.x > W+260) squad = null;
+  }
   // câmera: segue o projétil em voo; desliza até o tanque da vez no começo do turno
   let camTarget = null;
   if(state === "FLY" && projectiles.length) camTarget = { x: projectiles[0].x, y: projectiles[0].y };
@@ -1362,7 +1541,8 @@ function startOnlineGame(seed, w, first, ch){
   ];
   document.getElementById("hp1name").textContent = (myIndex===0 ? "🔵 Azul (você) " : "🔵 Azul ") + CHASSIS[ch[0]].icon;
   document.getElementById("hp2name").textContent = (myIndex===1 ? "🔴 Vermelho (você) " : "🔴 Vermelho ") + CHASSIS[ch[1]].icon;
-  projectiles = []; particles = []; floaters = []; pendingSync = null;
+  projectiles = []; particles = []; floaters = []; birds = []; pendingSync = null;
+  armSquad();
   cur = first; nextWindOverride = w;
   updateHP();
   document.getElementById("menu").classList.add("hidden");
@@ -1455,7 +1635,8 @@ function newGame(cpu){
   ];
   document.getElementById("hp1name").textContent = (cpu ? "🔵 Azul (você) " : "🔵 Azul ") + CHASSIS[p1Ch].icon;
   document.getElementById("hp2name").textContent = (cpu ? "🤖 CPU " : "🔴 Vermelho ") + CHASSIS[p2Ch].icon;
-  projectiles = []; particles = []; floaters = [];
+  projectiles = []; particles = []; floaters = []; birds = [];
+  armSquad();
   cur = Math.random() < 0.5 ? 0 : 1;
   updateHP();
   document.getElementById("menu").classList.add("hidden");
