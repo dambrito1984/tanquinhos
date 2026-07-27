@@ -46,6 +46,10 @@
   .wbtn.sel { background:#ffd23e; outline:3px solid #fff; }
   .wbtn:disabled { opacity:.4; cursor:default; }
   #btnrepair { background:#7ed957; font-size:14px; font-weight:800; }
+  #btnrepair b, #spleft b { font-size:12px; margin-left:3px; }
+  #spleft { display:flex; align-items:center; padding:7px 9px; border-radius:12px; font-size:15px;
+            background:rgba(10,20,35,.7); color:#ffd23e; font-weight:800; user-select:none; }
+  #spleft.vazio { opacity:.45; }
   #hint { font-size:11px; color:#fffc; background:rgba(10,20,35,.6); padding:6px 10px; border-radius:8px; max-width:150px; text-align:center; }
 
   .overlay { position:absolute; inset:0; background:rgba(8,14,26,.86); border-radius:12px; display:flex; flex-direction:column;
@@ -117,12 +121,13 @@
     </div>
     <div id="weapons">
       <button class="btn wbtn sel" data-w="normal" title="Tiro">🎯</button>
-      <button class="btn wbtn" data-w="big" title="Bombão">💣<span>2</span></button>
-      <button class="btn wbtn" data-w="triple" title="Tripla">🎆<span>2</span></button>
-      <button class="btn wbtn" data-w="cluster" title="Cacho">🧨<span>2</span></button>
-      <button class="btn wbtn" data-w="terra" title="Bomba de terra">🏔️<span>2</span></button>
-      <button class="btn wbtn" data-w="pula" title="Pula-pula">🦘<span>3</span></button>
-      <button class="btn wbtn hidden" id="btnrepair" title="Curar (perde o tiro deste turno)">🚑+20</button>
+      <button class="btn wbtn" data-w="big" title="Bombão">💣</button>
+      <button class="btn wbtn" data-w="triple" title="Tripla">🎆</button>
+      <button class="btn wbtn" data-w="cluster" title="Cacho">🧨</button>
+      <button class="btn wbtn" data-w="terra" title="Bomba de terra">🏔️</button>
+      <button class="btn wbtn" data-w="pula" title="Pula-pula">🦘</button>
+      <div id="spleft" title="Tiros especiais que ainda restam">🌟<b id="spnum">4</b></div>
+      <button class="btn wbtn hidden" id="btnrepair" title="Curar (perde o tiro deste turno)">🚑+20<b id="healnum">2</b></button>
     </div>
     <div id="hint">Arraste para mirar, solte para atirar!<br>Pinça = zoom • 2 dedos = mover câmera</div>
   </div>
@@ -197,13 +202,13 @@ const WEAPONS = {
   terra:  { r: 46, dmg: 0,  icon:"🏔️", name:"Bomba de terra", desc:"constrói um morro — boa p/ escapar de buracos!" },
   pula:   { r: 36, dmg: 42, icon:"🦘", name:"Pula-pula",      desc:"quica 2 vezes antes de explodir" }
 };
-const AMMO_START = { big:2, triple:2, cluster:2, terra:2, pula:3 };
+const SPECIAL_MAX = 4;     // orçamento único de tiros especiais por partida (escolhe quais gastar)
 const CHASSIS = {
   padrao:   { icon:"⚙️", label:"Padrão",     dmgMul:1,    takenMul:1,   climb:1.35,     fuel:120, speed:1,   hpMax:100 },
   rodoes:   { icon:"🛞", label:"Rodões",     dmgMul:0.75, takenMul:1,   climb:Infinity, fuel:150, speed:1,   hpMax:100 },
   blindado: { icon:"🛡️", label:"Blindado",   dmgMul:1,    takenMul:0.8, climb:0.95,     fuel:80,  speed:0.7, hpMax:100 },
   turbo:    { icon:"🏎️", label:"Turbo",      dmgMul:1,    takenMul:1,   climb:1.6,      fuel:210, speed:1.6, hpMax:80, extraMove:true },
-  medico:   { icon:"🚑", label:"Médico",     dmgMul:1,    takenMul:1,   climb:1.35,     fuel:130, speed:1,   hpMax:100, repair:20 },
+  medico:   { icon:"🚑", label:"Médico",     dmgMul:1,    takenMul:1,   climb:1.35,     fuel:130, speed:1,   hpMax:100, repair:20, heals:2 },
   sniper:   { icon:"🔭", label:"Sniper",     dmgMul:0.8,  takenMul:1,   climb:1.2,      fuel:100, speed:0.9, hpMax:100, aimSteps:72, barrel:1.65, noSpecials:true }
 };
 const EXTRA_MS = 5000;     // janela de fuga do Turbo depois do tiro
@@ -402,11 +407,11 @@ function crater(cx, cy, r){
 function safeCh(k){ return CHASSIS[k] ? k : "padrao"; }   // versão antiga em cache não quebra a partida
 function makeTank(x, color, name, isCPU, ch){
   ch = safeCh(ch);
-  const ammo = Object.assign({}, AMMO_START);
-  if(CHASSIS[ch].noSpecials) for(const k in ammo) ammo[k] = 0;   // Sniper só usa o tiro comum
   return { x, y: groundAt(x), vy:0, fallFrom:null, hp:CHASSIS[ch].hpMax, color, name, isCPU, chassis:ch,
            aim:{ang: x < W/2 ? -Math.PI/4 : -3*Math.PI/4, pow:0.6},
-           fuel: CHASSIS[ch].fuel, ammo, weapon:"normal", alive:true };
+           fuel: CHASSIS[ch].fuel, weapon:"normal", alive:true,
+           specials: CHASSIS[ch].noSpecials ? 0 : SPECIAL_MAX,   // Sniper não tem especiais
+           heals: CHASSIS[ch].heals || 0 };
 }
 function barrelLen(t){ return BARREL_L * (CHASSIS[t.chassis].barrel || 1); }
 function tankPhysics(t){
@@ -492,8 +497,8 @@ function fire(t){
   lastShooter = tanks.indexOf(t);
   const w = t.weapon;
   if(w !== "normal"){
-    if(t.ammo[w] <= 0) return;
-    t.ammo[w]--;
+    if(t.specials <= 0) return;
+    t.specials--;
   }
   const a = t.aim.ang, pow = t.aim.pow * MAXPOW;
   const bl = barrelLen(t);
@@ -632,7 +637,7 @@ function startTurn(){
 function doRepair(){
   const t = tanks[cur];
   const amt = CHASSIS[t.chassis].repair;
-  if(!amt || state !== "AIM" || t.hp >= CHASSIS[t.chassis].hpMax) return false;
+  if(!amt || state !== "AIM" || t.heals <= 0 || t.hp >= CHASSIS[t.chassis].hpMax) return false;
   const novo = Math.min(CHASSIS[t.chassis].hpMax, t.hp + amt);
   const w = -0.035 + Math.random()*0.07;
   if(online){ sendMsg({ type:"repair", hp: novo, wind: w }); nextWindOverride = w; }
@@ -644,6 +649,7 @@ function applyRepair(idx, novoHp){
   const t = tanks[idx];
   const ganho = Math.round(novoHp - t.hp);
   t.hp = novoHp;
+  t.heals = Math.max(0, t.heals - 1);   // roda nos dois lados no online
   updateHP();
   addFloater(t.x, t.y-56, "+"+ganho+" 🚑", "#7ed957");
   sfxRepair();
@@ -731,7 +737,7 @@ function cpuPlay(){
   const me = tanks[cur], foe = tanks[1-cur];
   if(state !== "AIM" || !me.isCPU) return;
   // Médico se cura quando está mal das pernas
-  if(CHASSIS[me.chassis].repair && me.hp <= CHASSIS[me.chassis].hpMax*0.5 && Math.random() < 0.75){
+  if(CHASSIS[me.chassis].repair && me.heals > 0 && me.hp <= CHASSIS[me.chassis].hpMax*0.5 && Math.random() < 0.75){
     doRepair(); return;
   }
   const dirTo = foe.x > me.x ? 1 : -1;
@@ -754,8 +760,9 @@ function cpuPlay(){
   me.aim.ang = best.ang + randn()*0.05;
   me.aim.pow = clamp(best.pw + randn()*0.035, 0.2, 1);
   // escolhe arma: bombão se estiver perdendo e tiver munição
-  if(me.ammo.big > 0 && (me.hp < foe.hp - 15 || (foe.hp < 45 && Math.random()<0.5))) me.weapon = "big";
-  else if(me.ammo.triple > 0 && Math.random() < 0.25) me.weapon = "triple";
+  // guarda os 4 especiais: usa quando está perdendo ou pode finalizar
+  if(me.specials > 0 && (me.hp < foe.hp - 15 || foe.hp < 45)) me.weapon = Math.random() < 0.6 ? "big" : "cluster";
+  else if(me.specials > 2 && Math.random() < 0.2) me.weapon = ["triple","cluster","pula"][Math.floor(Math.random()*3)];
   else me.weapon = "normal";
   fire(me);
 }
@@ -781,16 +788,19 @@ function updateWeaponsUI(){
   const meuTurno = !t.isCPU && state === "AIM" && (!online || cur === myIndex);
   document.querySelectorAll(".wbtn").forEach(b=>{
     const w = b.dataset.w;
-    if(!w) return;                                    // botão de reparo tratado abaixo
+    if(!w) return;                                    // botão de cura tratado abaixo
     b.classList.toggle("hidden", !!ch.noSpecials && w !== "normal");
-    const sp = b.querySelector("span");
-    if(sp) sp.textContent = t.ammo[w];
     b.classList.toggle("sel", t.weapon === w);
-    b.disabled = (w!=="normal" && t.ammo[w]<=0) || !meuTurno;
+    b.disabled = (w!=="normal" && t.specials<=0) || !meuTurno;
   });
+  const sp = document.getElementById("spleft");
+  sp.classList.toggle("hidden", !!ch.noSpecials);
+  sp.classList.toggle("vazio", t.specials <= 0);
+  document.getElementById("spnum").textContent = t.specials;
   const rep = document.getElementById("btnrepair");
   rep.classList.toggle("hidden", !ch.repair);
-  rep.disabled = !meuTurno || t.hp >= ch.hpMax;
+  document.getElementById("healnum").textContent = t.heals;
+  rep.disabled = !meuTurno || t.heals <= 0 || t.hp >= ch.hpMax;
 }
 
 // ============ SOM ============
@@ -1433,7 +1443,7 @@ document.querySelectorAll(".wbtn").forEach(b => {
     const t = tanks[cur];
     if(!canAct()) return;
     const w = b.dataset.w;
-    if(w !== "normal" && t.ammo[w] <= 0) return;
+    if(w !== "normal" && t.specials <= 0) return;
     t.weapon = w;
     updateWeaponsUI();
     toast(WEAPONS[w].icon + " " + WEAPONS[w].name + " — " + WEAPONS[w].desc, 1600);
