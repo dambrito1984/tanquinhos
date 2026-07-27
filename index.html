@@ -165,7 +165,7 @@
       <button class="btn chbtn" data-ch="blindado"><span class="chicon">🛡️</span><b>Blindado</b><small>−20% de dano recebido<br>lento e não sobe rampas</small></button>
       <button class="btn chbtn" data-ch="turbo"><span class="chicon">🏎️</span><b>Turbo</b><small>Rápido, muita gasolina<br>+5s p/ fugir após atirar<br>−20% de vida</small></button>
       <button class="btn chbtn" data-ch="medico"><span class="chicon">🚑</span><b>Médico</b><small>Cura +20 de vida<br>mas perde o tiro do turno</small></button>
-      <button class="btn chbtn" data-ch="sniper"><span class="chicon">🔭</span><b>Sniper</b><small>Enxerga a trajetória<br>quase 2× mais longe<br>só tem o tiro comum</small></button>
+      <button class="btn chbtn" data-ch="sniper"><span class="chicon">🔭</span><b>Sniper</b><small>Enxerga a trajetória<br>quase 2× mais longe<br>−20% de dano, sem especiais</small></button>
     </div>
   </div>
 
@@ -204,7 +204,7 @@ const CHASSIS = {
   blindado: { icon:"🛡️", label:"Blindado",   dmgMul:1,    takenMul:0.8, climb:0.95,     fuel:80,  speed:0.7, hpMax:100 },
   turbo:    { icon:"🏎️", label:"Turbo",      dmgMul:1,    takenMul:1,   climb:1.6,      fuel:210, speed:1.6, hpMax:80, extraMove:true },
   medico:   { icon:"🚑", label:"Médico",     dmgMul:1,    takenMul:1,   climb:1.35,     fuel:130, speed:1,   hpMax:100, repair:20 },
-  sniper:   { icon:"🔭", label:"Sniper",     dmgMul:1,    takenMul:1,   climb:1.2,      fuel:100, speed:0.9, hpMax:100, aimSteps:72, barrel:1.65, noSpecials:true }
+  sniper:   { icon:"🔭", label:"Sniper",     dmgMul:0.8,  takenMul:1,   climb:1.2,      fuel:100, speed:0.9, hpMax:100, aimSteps:72, barrel:1.65, noSpecials:true }
 };
 const EXTRA_MS = 5000;     // janela de fuga do Turbo depois do tiro
 const AIM_STEPS = 40;      // prévia de trajetória padrão
