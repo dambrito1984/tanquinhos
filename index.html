@@ -67,6 +67,11 @@
   .chchips { display:flex; gap:6px; align-items:center; font-size:14px; }
   .chchip { font-size:20px; padding:6px 9px; background:rgba(255,255,255,.25); border-radius:10px; }
   .chchip.sel { background:#ffd23e; outline:2px solid #fff; }
+  #extrabox { bottom:74px; left:50%; transform:translateX(-50%); background:rgba(10,20,35,.85);
+              color:#ffd23e; font-weight:800; padding:8px 14px; border-radius:12px; font-size:15px;
+              display:flex; align-items:center; gap:10px; border:2px solid #ffd23e; }
+  #extranum { font-size:24px; color:#fff; min-width:22px; text-align:center; }
+  #btnextraok { pointer-events:auto; background:#ffd23e; color:#402; padding:6px 12px; font-size:13px; }
   #btnfs { position:absolute; top:64px; right:10px; width:40px; height:40px; font-size:20px;
            background:rgba(10,20,35,.6); color:#fff; z-index:5; }
   #rotate { display:none; position:fixed; top:8px; left:50%; transform:translateX(-50%); background:#ffd23e;
@@ -93,6 +98,10 @@
   <button class="btn" id="btnfs" title="Tela cheia">⛶</button>
   <div class="hud" id="windbox"><div id="windlabel">VENTO</div><div id="windval">→ 5</div></div>
   <div class="hud" id="toast"></div>
+
+  <div class="hud hidden" id="extrabox">🏎️ Fuja! <span id="extranum">5</span>s
+    <button class="btn" id="btnextraok">✔ pronto</button>
+  </div>
 
   <div class="hud" id="bottombar">
     <div id="movebox">
@@ -146,9 +155,9 @@
     <h1 id="chtitle">Escolha seu tanque</h1>
     <div id="chgrid">
       <button class="btn chbtn" data-ch="padrao"><span class="chicon">⚙️</span><b>Padrão</b><small>Equilibrado em tudo</small></button>
-      <button class="btn chbtn" data-ch="rodoes"><span class="chicon">🛞</span><b>Rodões</b><small>Sobe quase tudo, +gasolina<br>−25% de dano causado</small></button>
-      <button class="btn chbtn" data-ch="blindado"><span class="chicon">🛡️</span><b>Blindado</b><small>−30% de dano recebido<br>lento e não sobe rampas</small></button>
-      <button class="btn chbtn" data-ch="turbo"><span class="chicon">🏎️</span><b>Turbo</b><small>Rápido, muita gasolina<br>−20% de vida</small></button>
+      <button class="btn chbtn" data-ch="rodoes"><span class="chicon">🛞</span><b>Rodões</b><small>Sobe e desce QUALQUER terreno<br>−25% de dano causado</small></button>
+      <button class="btn chbtn" data-ch="blindado"><span class="chicon">🛡️</span><b>Blindado</b><small>−20% de dano recebido<br>lento e não sobe rampas</small></button>
+      <button class="btn chbtn" data-ch="turbo"><span class="chicon">🏎️</span><b>Turbo</b><small>Rápido, muita gasolina<br>+5s p/ fugir após atirar<br>−20% de vida</small></button>
     </div>
   </div>
 
@@ -182,11 +191,12 @@ const WEAPONS = {
 };
 const AMMO_START = { big:2, triple:2, cluster:2, terra:2, pula:3 };
 const CHASSIS = {
-  padrao:  { icon:"⚙️", label:"Padrão",   dmgMul:1,    takenMul:1,   climb:1.35, fuel:120, speed:1,   hpMax:100 },
-  rodoes:  { icon:"🛞", label:"Rodões",   dmgMul:0.75, takenMul:1,   climb:3.2,  fuel:150, speed:1,   hpMax:100 },
-  blindado:{ icon:"🛡️", label:"Blindado", dmgMul:1,    takenMul:0.7, climb:0.95, fuel:80,  speed:0.7, hpMax:100 },
-  turbo:   { icon:"🏎️", label:"Turbo",    dmgMul:1,    takenMul:1,   climb:1.6,  fuel:210, speed:1.6, hpMax:80 }
+  padrao:  { icon:"⚙️", label:"Padrão",   dmgMul:1,    takenMul:1,   climb:1.35,     fuel:120, speed:1,   hpMax:100 },
+  rodoes:  { icon:"🛞", label:"Rodões",   dmgMul:0.75, takenMul:1,   climb:Infinity, fuel:150, speed:1,   hpMax:100 },
+  blindado:{ icon:"🛡️", label:"Blindado", dmgMul:1,    takenMul:0.8, climb:0.95,     fuel:80,  speed:0.7, hpMax:100 },
+  turbo:   { icon:"🏎️", label:"Turbo",    dmgMul:1,    takenMul:1,   climb:1.6,      fuel:210, speed:1.6, hpMax:80, extraMove:true }
 };
+const EXTRA_MS = 5000;     // janela de fuga do Turbo depois do tiro
 
 const cv = document.getElementById("game");
 const ctx = cv.getContext("2d");
@@ -220,6 +230,8 @@ let decor = [];            // gramíneas, arbustos, flores (sem colisão)
 // online
 let online = false, isHost = false, myIndex = 0, peer = null, conn = null;
 let lastShooter = 0, pendingSync = null, nextWindOverride = null, lastMoveSent = 0;
+// janela de fuga pós-tiro (Turbo)
+let extraWho = -1, extraUntil = 0, cpuExtraDir = 0;
 
 const clamp = (v,a,b) => v<a?a:(v>b?b:v);
 let rng = Math.random; // trocado por PRNG com semente no modo online (terreno igual nos 2 lados)
@@ -385,6 +397,11 @@ function tankPhysics(t){
     }
   } else { t.y = gy; t.vy = 0; t.fallFrom = null; }
 }
+// suaviza só a SUBIDA (Rodões escalando paredão); queda continua quadro a quadro
+function smoothDraw(t){
+  if(t.drawY === undefined || t.y > t.drawY || Math.abs(t.y - t.drawY) < 0.6) t.drawY = t.y;
+  else t.drawY += (t.y - t.drawY) * 0.25;
+}
 function slopeAngle(x){
   return Math.atan2(groundAt(x+10)-groundAt(x-10), 20);
 }
@@ -540,11 +557,21 @@ function setWind(v){
 }
 function newWind(){ setWind(rand(-0.035, 0.035)); }
 function canAct(){ return state === "AIM" && !tanks[cur].isCPU && (!online || cur === myIndex); }
+// qual tanque os controles de movimento comandam agora (mira normal ou fuga do Turbo)
+function movableTank(){
+  if(canAct()) return tanks[cur];
+  if(state === "EXTRA"){
+    const t = tanks[extraWho];
+    if(t && t.alive && !t.isCPU && (!online || extraWho === myIndex)) return t;
+  }
+  return null;
+}
 function startTurn(){
   const t = tanks[cur];
   t.fuel = CHASSIS[t.chassis].fuel; t.weapon = "normal";
   state = "AIM";
   camGlide = 50;
+  document.getElementById("extrabox").classList.add("hidden");
   if(online){
     if(nextWindOverride !== null){ setWind(nextWindOverride); nextWindOverride = null; }
   } else newWind();
@@ -557,6 +584,32 @@ function startTurn(){
   } else {
     toast(cur===0 ? "🔵 Sua vez!" : "🔴 Vez do Vermelho!", 1100);
   }
+}
+// Turbo ganha alguns segundos para sair de perto depois de atirar
+function tryStartExtra(){
+  const t = tanks[lastShooter];
+  if(!t || !t.alive || !CHASSIS[t.chassis].extraMove || t.fuel <= 0) return false;
+  if(online && lastShooter !== myIndex) return false;   // no online quem atirou controla a janela
+  state = "EXTRA"; extraWho = lastShooter;
+  cpuExtraDir = t.isCPU ? (rng() < 0.5 ? -1 : 1) : 0;
+  extraUntil = Date.now() + (t.isCPU ? 2000 : EXTRA_MS);
+  if(!t.isCPU){
+    document.getElementById("extrabox").classList.remove("hidden");
+    updateFuel();
+  }
+  if(online) sendMsg({ type:"extra" });
+  return true;
+}
+function endExtra(){
+  document.getElementById("extrabox").classList.add("hidden");
+  moveDir = 0; cpuExtraDir = 0; extraWho = -1;
+  finishTurnFlow();
+}
+function finishTurnFlow(){
+  if(!online) endTurn();
+  else if(lastShooter === myIndex){ sendSync(); endTurn(); }   // quem atirou manda o estado oficial
+  else if(pendingSync){ applySync(pendingSync); pendingSync = null; endTurn(); }
+  else state = "SYNC";                                         // espera o estado do atirador chegar
 }
 function endTurn(){
   const dead = tanks.filter(t => t.hp <= 0 && t.alive);
@@ -899,8 +952,9 @@ function drawTank(t){
     return;
   }
   const rot = slopeAngle(t.x);
+  const ty = t.drawY !== undefined ? t.drawY : t.y;   // subida suavizada
   ctx.save();
-  ctx.translate(t.x, t.y);
+  ctx.translate(t.x, ty);
   ctx.rotate(rot);
   // esteira (visual muda por chassi)
   ctx.fillStyle = "#2f2f2f";
@@ -919,7 +973,7 @@ function drawTank(t){
   ctx.restore();
   // torre + cano (sem rotação de inclinação, cano segue a mira)
   ctx.save();
-  ctx.translate(t.x, t.y-TURRET_H);
+  ctx.translate(t.x, ty-TURRET_H);
   ctx.fillStyle = t.color;
   ctx.beginPath(); ctx.arc(0, -3, 11, 0, Math.PI*2); ctx.fill();
   ctx.rotate(t.aim.ang);
@@ -928,18 +982,18 @@ function drawTank(t){
   ctx.restore();
   // antena com bandeirinha
   ctx.save();
-  ctx.translate(t.x, t.y-TURRET_H);
+  ctx.translate(t.x, ty-TURRET_H);
   ctx.strokeStyle = "#222"; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(-9,-9); ctx.lineTo(-13,-33); ctx.stroke();
   ctx.fillStyle = t.color;
   ctx.beginPath(); ctx.moveTo(-13,-33); ctx.lineTo(-1,-28); ctx.lineTo(-13,-24); ctx.closePath(); ctx.fill();
   ctx.restore();
-  // indicador de vez
-  if(tanks[cur] === t && state === "AIM"){
-    ctx.fillStyle = "rgba(255,255,255,.9)";
+  // indicador de vez (também aponta quem está na fuga do Turbo)
+  if((tanks[cur] === t && state === "AIM") || (state === "EXTRA" && tanks[extraWho] === t)){
+    ctx.fillStyle = state === "EXTRA" ? "#ffd23e" : "rgba(255,255,255,.9)";
     const bob = Math.sin(Date.now()/200)*3;
     ctx.beginPath();
-    ctx.moveTo(t.x, t.y-62+bob); ctx.lineTo(t.x-9, t.y-75+bob); ctx.lineTo(t.x+9, t.y-75+bob);
+    ctx.moveTo(t.x, ty-62+bob); ctx.lineTo(t.x-9, ty-75+bob); ctx.lineTo(t.x+9, ty-75+bob);
     ctx.closePath(); ctx.fill();
   }
 }
@@ -982,8 +1036,9 @@ function drawAim(){
 // ============ LOOP ============
 function tick(){
   // física
-  for(const t of tanks) tankPhysics(t);
-  if(moveDir !== 0 && canAct()) tryMove(tanks[cur], moveDir);
+  for(const t of tanks){ tankPhysics(t); smoothDraw(t); }
+  const mv = movableTank();
+  if(moveDir !== 0 && mv) tryMove(mv, moveDir);
   if(state === "FLY"){
     for(let i=projectiles.length-1; i>=0; i--){
       const p = projectiles[i];
@@ -995,12 +1050,14 @@ function tick(){
   }
   if(state === "WAIT"){
     const settling = tanks.some(t => t.alive && t.fallFrom !== null);
-    if(!settling && --waitTimer <= 0){
-      if(!online) endTurn();
-      else if(lastShooter === myIndex){ sendSync(); endTurn(); }        // quem atirou manda o estado oficial
-      else if(pendingSync){ applySync(pendingSync); pendingSync = null; endTurn(); }
-      else state = "SYNC";                                              // espera o estado do atirador chegar
-    }
+    if(!settling && --waitTimer <= 0 && !tryStartExtra()) finishTurnFlow();
+  }
+  if(state === "EXTRA"){
+    const t = tanks[extraWho];
+    if(t.isCPU && cpuExtraDir) tryMove(t, cpuExtraDir);
+    const left = extraUntil - Date.now();
+    document.getElementById("extranum").textContent = Math.max(0, Math.ceil(left/1000));
+    if(left <= 0 || t.fuel <= 0 || !t.alive) endExtra();
   }
   for(let i=particles.length-1;i>=0;i--){
     const pt = particles[i];
@@ -1015,6 +1072,7 @@ function tick(){
   // câmera: segue o projétil em voo; desliza até o tanque da vez no começo do turno
   let camTarget = null;
   if(state === "FLY" && projectiles.length) camTarget = { x: projectiles[0].x, y: projectiles[0].y };
+  else if(state === "EXTRA" && extraWho >= 0) camTarget = { x: tanks[extraWho].x, y: tanks[extraWho].y - 40 };
   else if(camGlide > 0){ camGlide--; const tc = tanks[cur]; camTarget = { x: tc.x, y: tc.y - 40 }; }
   if(camTarget && cam.z > 1.01){
     const vw = W/cam.z, vh = H/cam.z;
@@ -1244,6 +1302,7 @@ function handleMsg(m){
     if(state === "SYNC"){ applySync(m); endTurn(); }
     else pendingSync = m;
   }
+  else if(m.type === "extra"){ toast("🏎️ Turbo adversário fugindo...", 2200); }
   else if(m.type === "again"){ if(isHost) sendInit(); }
 }
 // quem atirou é a autoridade do turno: manda HP, posições e terreno oficiais
@@ -1266,6 +1325,9 @@ function applySync(m){
   nextWindOverride = m.wind;
   updateHP();
 }
+document.getElementById("btnextraok").addEventListener("click", () => {
+  if(state === "EXTRA") endExtra();
+});
 document.getElementById("btnfs").addEventListener("click", () => {
   audio();
   const el = document.documentElement;
