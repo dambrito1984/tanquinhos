@@ -122,7 +122,7 @@
       <button class="btn wbtn" data-w="cluster" title="Cacho">🧨<span>2</span></button>
       <button class="btn wbtn" data-w="terra" title="Bomba de terra">🏔️<span>2</span></button>
       <button class="btn wbtn" data-w="pula" title="Pula-pula">🦘<span>3</span></button>
-      <button class="btn wbtn hidden" id="btnrepair" title="Reparar (perde o tiro deste turno)">🔧+20</button>
+      <button class="btn wbtn hidden" id="btnrepair" title="Curar (perde o tiro deste turno)">🚑+20</button>
     </div>
     <div id="hint">Arraste para mirar, solte para atirar!<br>Pinça = zoom • 2 dedos = mover câmera</div>
   </div>
@@ -145,7 +145,7 @@
       <button class="btn chchip" data-chc="rodoes" title="Rodões">🛞</button>
       <button class="btn chchip" data-chc="blindado" title="Blindado">🛡️</button>
       <button class="btn chchip" data-chc="turbo" title="Turbo">🏎️</button>
-      <button class="btn chchip" data-chc="engenheiro" title="Engenheiro">🔧</button>
+      <button class="btn chchip" data-chc="medico" title="Médico">🚑</button>
       <button class="btn chchip" data-chc="sniper" title="Sniper">🔭</button>
     </div>
     <button class="btn bigbtn" id="btncreate">🏠 Criar sala</button>
@@ -164,8 +164,8 @@
       <button class="btn chbtn" data-ch="rodoes"><span class="chicon">🛞</span><b>Rodões</b><small>Sobe e desce QUALQUER terreno<br>−25% de dano causado</small></button>
       <button class="btn chbtn" data-ch="blindado"><span class="chicon">🛡️</span><b>Blindado</b><small>−20% de dano recebido<br>lento e não sobe rampas</small></button>
       <button class="btn chbtn" data-ch="turbo"><span class="chicon">🏎️</span><b>Turbo</b><small>Rápido, muita gasolina<br>+5s p/ fugir após atirar<br>−20% de vida</small></button>
-      <button class="btn chbtn" data-ch="engenheiro"><span class="chicon">🔧</span><b>Engenheiro</b><small>Conserta +20 de vida<br>mas perde o tiro do turno</small></button>
-      <button class="btn chbtn" data-ch="sniper"><span class="chicon">🔭</span><b>Sniper</b><small>Vê a trajetória inteira<br>e marca onde vai cair<br>só tem o tiro comum</small></button>
+      <button class="btn chbtn" data-ch="medico"><span class="chicon">🚑</span><b>Médico</b><small>Cura +20 de vida<br>mas perde o tiro do turno</small></button>
+      <button class="btn chbtn" data-ch="sniper"><span class="chicon">🔭</span><b>Sniper</b><small>Enxerga a trajetória<br>quase 2× mais longe<br>só tem o tiro comum</small></button>
     </div>
   </div>
 
@@ -203,8 +203,8 @@ const CHASSIS = {
   rodoes:   { icon:"🛞", label:"Rodões",     dmgMul:0.75, takenMul:1,   climb:Infinity, fuel:150, speed:1,   hpMax:100 },
   blindado: { icon:"🛡️", label:"Blindado",   dmgMul:1,    takenMul:0.8, climb:0.95,     fuel:80,  speed:0.7, hpMax:100 },
   turbo:    { icon:"🏎️", label:"Turbo",      dmgMul:1,    takenMul:1,   climb:1.6,      fuel:210, speed:1.6, hpMax:80, extraMove:true },
-  engenheiro:{icon:"🔧", label:"Engenheiro", dmgMul:1,    takenMul:1,   climb:1.35,     fuel:130, speed:1,   hpMax:100, repair:20 },
-  sniper:   { icon:"🔭", label:"Sniper",     dmgMul:1,    takenMul:1,   climb:1.2,      fuel:100, speed:0.9, hpMax:100, aimSteps:150, barrel:1.65, noSpecials:true }
+  medico:   { icon:"🚑", label:"Médico",     dmgMul:1,    takenMul:1,   climb:1.35,     fuel:130, speed:1,   hpMax:100, repair:20 },
+  sniper:   { icon:"🔭", label:"Sniper",     dmgMul:1,    takenMul:1,   climb:1.2,      fuel:100, speed:0.9, hpMax:100, aimSteps:72, barrel:1.65, noSpecials:true }
 };
 const EXTRA_MS = 5000;     // janela de fuga do Turbo depois do tiro
 const AIM_STEPS = 40;      // prévia de trajetória padrão
@@ -386,8 +386,9 @@ function crater(cx, cy, r){
 }
 
 // ============ TANQUES ============
+function safeCh(k){ return CHASSIS[k] ? k : "padrao"; }   // versão antiga em cache não quebra a partida
 function makeTank(x, color, name, isCPU, ch){
-  ch = ch || "padrao";
+  ch = safeCh(ch);
   const ammo = Object.assign({}, AMMO_START);
   if(CHASSIS[ch].noSpecials) for(const k in ammo) ammo[k] = 0;   // Sniper só usa o tiro comum
   return { x, y: groundAt(x), vy:0, fallFrom:null, hp:CHASSIS[ch].hpMax, color, name, isCPU, chassis:ch,
@@ -600,7 +601,7 @@ function startTurn(){
     toast(cur===0 ? "🔵 Sua vez!" : "🔴 Vez do Vermelho!", 1100);
   }
 }
-// Engenheiro: conserta o próprio tanque no lugar de atirar
+// Médico: cura o próprio tanque no lugar de atirar
 function doRepair(){
   const t = tanks[cur];
   const amt = CHASSIS[t.chassis].repair;
@@ -617,14 +618,14 @@ function applyRepair(idx, novoHp){
   const ganho = Math.round(novoHp - t.hp);
   t.hp = novoHp;
   updateHP();
-  addFloater(t.x, t.y-56, "+"+ganho+" 🔧", "#7ed957");
+  addFloater(t.x, t.y-56, "+"+ganho+" 🚑", "#7ed957");
   sfxRepair();
   for(let i=0;i<20;i++){
     const a = rand(0, Math.PI*2), sp = rand(0.4, 2.4);
     particles.push({ x:t.x, y:t.y-20, vx:Math.cos(a)*sp, vy:Math.sin(a)*sp-1.6,
                      life:rand(25,55), c: Math.random()<0.6 ? "#7ed957" : "#d9f7c4", r:rand(2,4) });
   }
-  toast("🔧 Consertado! Mas perdeu o tiro deste turno.", 2000);
+  toast("🚑 Curado! Mas perdeu o tiro deste turno.", 2000);
 }
 // Turbo ganha alguns segundos para sair de perto depois de atirar
 function tryStartExtra(){
@@ -702,7 +703,7 @@ function simShot(t, ang, pow){
 function cpuPlay(){
   const me = tanks[cur], foe = tanks[1-cur];
   if(state !== "AIM" || !me.isCPU) return;
-  // Engenheiro se conserta quando está mal das pernas
+  // Médico se cura quando está mal das pernas
   if(CHASSIS[me.chassis].repair && me.hp <= CHASSIS[me.chassis].hpMax*0.5 && Math.random() < 0.75){
     doRepair(); return;
   }
@@ -1054,7 +1055,7 @@ function drawTank(t){
   ctx.translate(t.x, ty-TURRET_H);
   ctx.strokeStyle = "#222"; ctx.lineWidth = 2;
   ctx.beginPath(); ctx.moveTo(-9,-9); ctx.lineTo(-13,-33); ctx.stroke();
-  if(t.chassis === "engenheiro"){
+  if(t.chassis === "medico"){
     // bandeira branca com cruz vermelha (posto de socorro)
     const fl = Math.sin(Date.now()/260)*1.2;          // tremula no vento
     ctx.fillStyle = "#fff";
@@ -1094,26 +1095,15 @@ function drawAim(){
   const steps = CHASSIS[t.chassis].aimSteps || AIM_STEPS;
   const fade = 0.95/steps;              // some no fim da linha, seja ela curta ou longa
   ctx.fillStyle = "rgba(25,30,42,.95)"; // escura p/ contraste no céu
-  let last = null;
   for(let i=0;i<steps;i++){
     const r = stepProj(p);
-    if(r.hit || r.gone){ last = r.hit ? {x:p.x, y:p.y} : null; break; }
+    if(r.hit || r.gone) break;
     if(i % 3 === 0){
       ctx.globalAlpha = 0.95 - i*fade*0.62;
       ctx.beginPath(); ctx.arc(p.x, p.y, 4.4 - (i/steps)*2, 0, Math.PI*2); ctx.fill();
     }
   }
   ctx.globalAlpha = 1;
-  if(last){   // o Sniper enxerga longe o bastante para marcar o ponto de impacto
-    ctx.strokeStyle = "rgba(255,60,60,.9)"; ctx.lineWidth = 2.5;
-    ctx.beginPath(); ctx.arc(last.x, last.y, 9, 0, Math.PI*2); ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(last.x-13, last.y); ctx.lineTo(last.x-4, last.y);
-    ctx.moveTo(last.x+4, last.y); ctx.lineTo(last.x+13, last.y);
-    ctx.moveTo(last.x, last.y-13); ctx.lineTo(last.x, last.y-4);
-    ctx.moveTo(last.x, last.y+4); ctx.lineTo(last.x, last.y+13);
-    ctx.stroke();
-  }
   // elástico visual (drag guarda coords de tela → converte p/ mundo)
   const ax = drag.sx/cam.z + cam.x, ay = drag.sy/cam.z + cam.y;
   const bx = drag.cx/cam.z + cam.x, by = drag.cy/cam.z + cam.y;
@@ -1270,7 +1260,7 @@ document.querySelectorAll(".wbtn").forEach(b => {
 });
 
 // ============ ESCOLHA DE CHASSI ============
-const CH_KEYS = ["padrao","rodoes","blindado","turbo","engenheiro","sniper"];
+const CH_KEYS = ["padrao","rodoes","blindado","turbo","medico","sniper"];
 let p1Ch = "padrao", p2Ch = "padrao", selChassisOnline = "padrao", guestCh = "padrao", chassisCb = null;
 function openChassis(title, cb){
   document.getElementById("chtitle").textContent = title;
@@ -1357,7 +1347,8 @@ function sendInit(){
   startOnlineGame(seed, w, first, ch);
 }
 function startOnlineGame(seed, w, first, ch){
-  ch = ch || ["padrao","padrao"];
+  ch = (ch || []).map(safeCh);
+  while(ch.length < 2) ch.push("padrao");
   online = true; vsCPU = false;
   clearTimeout(cpuTimeout);
   rng = mulberry32(seed);   // terreno idêntico nos dois aparelhos
