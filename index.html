@@ -79,6 +79,9 @@
               display:flex; align-items:center; gap:10px; border:2px solid #ffd23e; }
   #extranum { font-size:24px; color:#fff; min-width:22px; text-align:center; }
   #btnextraok { pointer-events:auto; background:#ffd23e; color:#402; padding:6px 12px; font-size:13px; }
+  #placar { top:62px; left:50%; transform:translateX(-50%); background:rgba(10,20,35,.72);
+            color:#fff; padding:4px 12px; border-radius:9px; font-size:13px; letter-spacing:1px; }
+  #placar b { font-size:16px; }
   #btnfs { position:absolute; top:64px; right:10px; width:40px; height:40px; font-size:20px;
            background:rgba(10,20,35,.6); color:#fff; z-index:5; }
   #rotate { display:none; position:fixed; top:8px; left:50%; transform:translateX(-50%); background:#ffd23e;
@@ -104,6 +107,7 @@
   <div class="hud hpcard" id="hp2card"><div class="hpname" id="hp2name">🔴 Jogador 2</div><div class="hpbar"><div class="hpfill" id="hp2fill" style="width:100%"></div></div></div>
   <button class="btn" id="btnfs" title="Tela cheia">⛶</button>
   <div class="hud" id="windbox"><div id="windlabel">VENTO</div><div id="windval">→ 5</div></div>
+  <div class="hud hidden" id="placar">🔵 <b id="pl1">0</b> × <b id="pl2">0</b> 🔴</div>
   <div class="hud" id="toast"></div>
 
   <div class="hud hidden" id="extrabox">🏎️ Fuja! <span id="extranum">5</span>s
@@ -137,6 +141,11 @@
     <p>Aquela guerrinha de tanques do caderno, agora de verdade.<br>
        Arraste para mirar (tipo estilingue), solte para atirar.<br>
        O terreno é destruído de verdade — cuidado para não ficar preso na cratera! 🕳️</p>
+    <div class="chchips">Dificuldade da CPU:
+      <button class="btn chchip" data-dif="facil" title="Fácil">😊</button>
+      <button class="btn chchip sel" data-dif="normal" title="Normal">😐</button>
+      <button class="btn chchip" data-dif="dificil" title="Difícil">😈</button>
+    </div>
     <button class="btn bigbtn" id="btn1p">🤖 1 Jogador (vs CPU)</button>
     <button class="btn bigbtn" id="btn2p">👥 2 Jogadores</button>
     <button class="btn bigbtn" id="btnonline">🌐 Jogar online</button>
@@ -212,6 +221,14 @@ const CHASSIS = {
   sniper:   { icon:"🔭", label:"Sniper",     dmgMul:0.8,  takenMul:1,   climb:1.2,      fuel:100, speed:0.9, hpMax:100, aimSteps:72, barrel:1.65, noSpecials:true }
 };
 const EXTRA_MS = 5000;     // janela de fuga do Turbo depois do tiro
+const DIFICULDADES = {     // quanto a CPU erra a pontaria e o quanto ela joga bem
+  facil:   { rot:"😊", nome:"Fácil",   erroAng:0.135, erroPow:0.085, especial:0.25, cura:0.4 },
+  normal:  { rot:"😐", nome:"Normal",  erroAng:0.050, erroPow:0.035, especial:1,    cura:0.75 },
+  dificil: { rot:"😈", nome:"Difícil", erroAng:0.018, erroPow:0.012, especial:1,    cura:0.95 }
+};
+let dificuldade = localStorage.getItem("tanq-dif") || "normal";
+if(!DIFICULDADES[dificuldade]) dificuldade = "normal";
+const METRO = 5;           // px por "metro" no aviso de tiro errado
 const AIM_STEPS = 40;      // prévia de trajetória padrão
 
 const cv = document.getElementById("game");
@@ -247,6 +264,7 @@ let birds = [];            // passarinhos que fogem das árvores derrubadas
 let bg = null, bgBase = 0; // cenário distante, atrás do terreno jogável
 let bgCache = null;        // cenário é estático: desenha uma vez, depois só copia
 let sol = { x: 870, y: 70, r: 34, fase: 0 };
+let serie = [0, 0];        // vitórias acumuladas na sequência de partidas
 // esquadrilha de 3 caças: um único sobrevoo por partida
 let squad = null, squadAt = 0, squadDone = false, squadDelay = 0, squadDir = 1, squadY = 90;
 const FORMACAO = [ {dx:0, dy:0}, {dx:-40, dy:-21}, {dx:-40, dy:21} ];   // V clássico
@@ -642,6 +660,8 @@ function explode(x, y, wkey, owner){
                      life:rand(20,50), c: Math.random()<0.5 ? "#ff9a3d" : (Math.random()<0.5 ? "#6b4b2a" : "#ffd23e"), r:rand(2,5) });
   }
   const shooterMul = owner ? CHASSIS[owner.chassis].dmgMul : 1;
+  const alvo = owner ? tanks[1 - tanks.indexOf(owner)] : null;
+  let acertouAlvo = false;
   for(const t of tanks){
     if(!t.alive) continue;
     const d = Math.hypot(t.x-x, (t.y-13)-y);
@@ -650,9 +670,15 @@ function explode(x, y, wkey, owner){
       const dmg = Math.round(wp.dmg * (1 - d/maxD) * shooterMul * CHASSIS[t.chassis].takenMul);
       if(dmg > 0){
         t.hp -= dmg;
+        if(t === alvo) acertouAlvo = true;
         addFloater(t.x, t.y-56, "-"+dmg, t===owner ? "#ffd23e" : "#ff6b57");
       }
     }
+  }
+  // errou: mostra por quanto, para ajudar a corrigir o próximo tiro
+  if(alvo && alvo.alive && !acertouAlvo && wkey !== "mini"){
+    const dist = Math.hypot(alvo.x - x, (alvo.y - 13) - y);
+    addFloater(x, y - 26, "errou por " + Math.round(dist/METRO) + " m", "#e8f0f7");
   }
   // dano nas árvores
   for(const tr of trees){
@@ -822,13 +848,24 @@ function explodeTankFX(t){
 function showGameOver(winner){
   const go = document.getElementById("gameover");
   const title = document.getElementById("gotitle"), txt = document.getElementById("gotext");
-  if(!winner){ title.textContent = "💥 Empate!"; txt.textContent = "Os dois tanques foram destruídos!"; }
+  if(winner) serie[tanks.indexOf(winner)]++;
+  atualizarPlacar();
+  const s = "Série: " + serie[0] + " × " + serie[1];
+  if(!winner){ title.textContent = "💥 Empate!"; txt.textContent = "Os dois tanques foram destruídos! · " + s; }
   else {
     title.textContent = "🏆 " + winner.name + " venceu!";
-    txt.textContent = winner.isCPU ? "A CPU levou essa... revanche?" : "Grande vitória de guerra! 🎖️";
+    const lead = serie[0] === serie[1] ? "Empatados na série!"
+               : (winner.isCPU ? "A CPU está na frente..." : "Vitória! 🎖️");
+    txt.textContent = lead + " · " + s;
   }
   go.classList.remove("hidden");
 }
+function atualizarPlacar(){
+  document.getElementById("pl1").textContent = serie[0];
+  document.getElementById("pl2").textContent = serie[1];
+  document.getElementById("placar").classList.toggle("hidden", serie[0] + serie[1] === 0);
+}
+function zerarSerie(){ serie = [0, 0]; atualizarPlacar(); }
 
 // ============ CPU ============
 function simShot(t, ang, pow){
@@ -846,7 +883,8 @@ function cpuPlay(){
   const me = tanks[cur], foe = tanks[1-cur];
   if(state !== "AIM" || !me.isCPU) return;
   // Médico se cura quando está mal das pernas
-  if(CHASSIS[me.chassis].repair && me.heals > 0 && me.hp <= CHASSIS[me.chassis].hpMax*0.5 && Math.random() < 0.75){
+  if(CHASSIS[me.chassis].repair && me.heals > 0 && me.hp <= CHASSIS[me.chassis].hpMax*0.5
+     && Math.random() < DIFICULDADES[dificuldade].cura){
     doRepair(); return;
   }
   const dirTo = foe.x > me.x ? 1 : -1;
@@ -865,13 +903,15 @@ function cpuPlay(){
     const deg = rand(35,65);
     best = {ang: dirTo>0 ? -deg*Math.PI/180 : Math.PI+deg*Math.PI/180, pw: rand(0.5,0.9)};
   }
-  // erro humano da CPU
-  me.aim.ang = best.ang + randn()*0.05;
-  me.aim.pow = clamp(best.pw + randn()*0.035, 0.2, 1);
-  // escolhe arma: bombão se estiver perdendo e tiver munição
+  // erro de pontaria conforme a dificuldade escolhida
+  const D = DIFICULDADES[dificuldade];
+  me.aim.ang = best.ang + randn()*D.erroAng;
+  me.aim.pow = clamp(best.pw + randn()*D.erroPow, 0.2, 1);
   // guarda os 4 especiais: usa quando está perdendo ou pode finalizar
-  if(me.specials > 0 && (me.hp < foe.hp - 15 || foe.hp < 45)) me.weapon = Math.random() < 0.6 ? "big" : "cluster";
-  else if(me.specials > 2 && Math.random() < 0.2) me.weapon = ["triple","cluster","pula"][Math.floor(Math.random()*3)];
+  if(me.specials > 0 && Math.random() < D.especial && (me.hp < foe.hp - 15 || foe.hp < 45))
+    me.weapon = Math.random() < 0.6 ? "big" : "cluster";
+  else if(me.specials > 2 && Math.random() < D.especial*0.25)
+    me.weapon = ["triple","cluster","pula"][Math.floor(Math.random()*3)];
   else me.weapon = "normal";
   fire(me);
 }
@@ -1781,10 +1821,18 @@ document.querySelectorAll(".chbtn").forEach(b => b.addEventListener("click", () 
   const cb = chassisCb; chassisCb = null;
   if(cb) cb(b.dataset.ch);
 }));
-document.querySelectorAll(".chchip").forEach(b => b.addEventListener("click", () => {
+document.querySelectorAll(".chchip[data-chc]").forEach(b => b.addEventListener("click", () => {
   selChassisOnline = b.dataset.chc;
-  document.querySelectorAll(".chchip").forEach(c => c.classList.toggle("sel", c === b));
+  document.querySelectorAll(".chchip[data-chc]").forEach(c => c.classList.toggle("sel", c === b));
 }));
+document.querySelectorAll(".chchip[data-dif]").forEach(b => {
+  b.classList.toggle("sel", b.dataset.dif === dificuldade);
+  b.addEventListener("click", () => {
+    dificuldade = b.dataset.dif;
+    try { localStorage.setItem("tanq-dif", dificuldade); } catch(e){}
+    document.querySelectorAll(".chchip[data-dif]").forEach(c => c.classList.toggle("sel", c === b));
+  });
+});
 
 // ============ ONLINE (WebRTC via PeerJS) ============
 const CODE_CHARS = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // sem 0/O/1/I para não confundir
@@ -1797,7 +1845,7 @@ function cleanupNet(){
 }
 function hostRoom(){
   if(typeof Peer === "undefined"){ netStatus("Sem internet — o módulo online não carregou. Recarregue a página."); return; }
-  cleanupNet();
+  cleanupNet(); zerarSerie();
   const code = makeCode();
   netStatus("Criando sala...");
   peer = new Peer("tanq-" + code.toLowerCase());
@@ -1815,7 +1863,7 @@ function joinRoom(){
   if(typeof Peer === "undefined"){ netStatus("Sem internet — o módulo online não carregou. Recarregue a página."); return; }
   const code = document.getElementById("codein").value.trim().toLowerCase();
   if(code.length !== 4){ netStatus("Digite o código de 4 letras da sala."); return; }
-  cleanupNet();
+  cleanupNet(); zerarSerie();
   netStatus("Entrando na sala " + code.toUpperCase() + "...");
   peer = new Peer();
   peer.on("error", e => {
@@ -1870,7 +1918,7 @@ function startOnlineGame(seed, w, first, ch){
   projectiles = []; particles = []; floaters = []; birds = []; pendingSync = null;
   armSquad();
   cur = first; nextWindOverride = w;
-  updateHP();
+  updateHP(); atualizarPlacar();
   document.getElementById("menu").classList.add("hidden");
   document.getElementById("onlinemenu").classList.add("hidden");
   document.getElementById("gameover").classList.add("hidden");
@@ -1964,13 +2012,13 @@ function newGame(cpu){
   projectiles = []; particles = []; floaters = []; birds = [];
   armSquad();
   cur = Math.random() < 0.5 ? 0 : 1;
-  updateHP();
+  updateHP(); atualizarPlacar();
   document.getElementById("menu").classList.add("hidden");
   document.getElementById("gameover").classList.add("hidden");
   startTurn();
 }
 document.getElementById("btn1p").addEventListener("click", () => {
-  audio();
+  audio(); zerarSerie();
   openChassis("Escolha seu tanque", k => {
     p1Ch = k;
     p2Ch = CH_KEYS[Math.floor(Math.random()*CH_KEYS.length)]; // CPU sorteia o dela
@@ -1978,7 +2026,7 @@ document.getElementById("btn1p").addEventListener("click", () => {
   });
 });
 document.getElementById("btn2p").addEventListener("click", () => {
-  audio();
+  audio(); zerarSerie();
   openChassis("🔵 Jogador 1: escolha seu tanque", k => {
     p1Ch = k;
     openChassis("🔴 Jogador 2: escolha seu tanque", k2 => { p2Ch = k2; newGame(false); });
