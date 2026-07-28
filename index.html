@@ -392,8 +392,9 @@ function makeTree(x){
   const sc = rand(0.94, 1.1);
   const t = { x, kind, alive:true, sway: rand(0, Math.PI*2), lean: rand(-0.08, 0.08),
               hue: Math.round(rand(104, 122)), sat: Math.round(rand(42, 50)), lit: Math.round(rand(30, 37)),
-              trunkLit: Math.round(rand(28, 34)),
-              fruit: rng() < 0.22 ? "#e74c3c" : null };
+              trunkLit: Math.round(rand(28, 34)) };
+  const sorteioFruta = rng() < 0.22;          // sorteia sempre, p/ o online não sair de sincronia
+  t.fruit = (kind === "redonda" && sorteioFruta) ? "#e74c3c" : null;   // só a redonda dá fruta
   if(kind === "pinheiro"){ t.h = rand(72, 86)*sc; t.r = rand(20, 24)*sc; t.cy = t.h*0.72; t.cr = t.r*1.15; }
   else if(kind === "alta"){ t.h = rand(80, 94)*sc; t.r = rand(17, 20)*sc; t.cy = t.h - t.r*0.2; t.cr = t.r; }
   else if(kind === "larga"){ t.h = rand(46, 54)*sc; t.r = rand(28, 33)*sc; t.cy = t.h; t.cr = t.r*1.05; }

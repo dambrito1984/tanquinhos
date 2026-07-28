@@ -60,8 +60,9 @@ function makeTree(x){
   const sc = rand(0.94, 1.1);
   const t = { x, kind, alive:true, sway: rand(0, Math.PI*2), lean: rand(-0.08, 0.08),
               hue: Math.round(rand(104, 122)), sat: Math.round(rand(42, 50)), lit: Math.round(rand(30, 37)),
-              trunkLit: Math.round(rand(28, 34)),
-              fruit: rng() < 0.22 ? "#e74c3c" : null };
+              trunkLit: Math.round(rand(28, 34)) };
+  const sorteioFruta = rng() < 0.22;
+  t.fruit = (kind === "redonda" && sorteioFruta) ? "#e74c3c" : null;   // só a redonda dá fruta
   if(kind === "pinheiro"){ t.h = rand(72, 86)*sc; t.r = rand(20, 24)*sc; t.cy = t.h*0.72; t.cr = t.r*1.15; }
   else if(kind === "alta"){ t.h = rand(80, 94)*sc; t.r = rand(17, 20)*sc; t.cy = t.h - t.r*0.2; t.cr = t.r; }
   else if(kind === "larga"){ t.h = rand(46, 54)*sc; t.r = rand(28, 33)*sc; t.cy = t.h; t.cr = t.r*1.05; }
@@ -239,8 +240,8 @@ const ITENS = [
     hit:false, zoom:2.6, mk:()=>{ rng = mulberry32(9); let a; do { a = mkArbusto(X); } while(!a.berry); decor = [a]; trees = []; } },
   { nome:"Pedra", desc:"Seixo achatado com reflexo de luz, 9 a 15px. Não é planta, mas entra na mesma mistura do chão (11%).",
     hit:false, zoom:3.4, mk:()=>{ rng = mulberry32(3); decor = [mkPedra(X)]; trees = []; } },
-  { nome:"Árvore redonda", desc:"Copa cheia em três bolas, 58 a 70px de altura. É a espécie mais comum (2 chances em 5).",
-    hit:true, mk:()=>{ decor = []; trees = [arvoreDe("redonda", 20260727)]; } },
+  { nome:"Árvore redonda", desc:"Copa cheia em três bolas, 58 a 70px de altura. É a espécie mais comum (2 chances em 5) e a única que dá frutinhas — 22% delas nascem com fruta.",
+    hit:true, mk:()=>{ decor = []; let t, s = 20260727; do { t = arvoreDe("redonda", s++); } while(!t.fruit); trees = [t]; } },
   { nome:"Pinheiro", desc:"Três saias triangulares empilhadas, 72 a 86px. A área de acerto fica mais baixa, acompanhando o cone.",
     hit:true, mk:()=>{ decor = []; trees = [arvoreDe("pinheiro", 20260727)]; } },
   { nome:"Árvore alta", desc:"Tronco esguio e copa pequena, 80 a 94px. A mais alta, mas também a mais fácil de derrubar.",
