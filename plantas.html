@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tanquinhos! · plantas do terreno</title>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  body{background:#eef4f8;font-family:-apple-system,"Segoe UI",Roboto,sans-serif;color:#1a2332;padding:24px}
+  h1{font-size:26px;margin-bottom:4px}
+  .sub{color:#5b6b7a;font-size:14px;margin-bottom:22px}
+  .grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:16px;max-width:1180px}
+  .card{background:#fff;border-radius:14px;padding:12px;box-shadow:0 2px 8px rgba(20,40,70,.09)}
+  canvas{display:block;width:100%;height:auto;background:linear-gradient(#f7fbfd,#eaf3f7);border-radius:9px}
+  .num{display:inline-block;background:#1a2332;color:#fff;font-weight:800;font-size:13px;
+       width:23px;height:23px;line-height:23px;text-align:center;border-radius:7px;margin-bottom:7px}
+  .nome{font-weight:700;font-size:15px;margin-top:8px}
+  .desc{color:#6b7b8a;font-size:12px;line-height:1.45;margin-top:3px}
+  .tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:20px;margin-top:7px}
+  .bate{background:#ffe0e0;color:#a33}
+  .passa{background:#e2f3e4;color:#276b32}
+  footer{margin-top:26px;color:#6b7b8a;font-size:13px;max-width:760px;line-height:1.6}
+  button{margin-top:18px;padding:9px 16px;border:none;border-radius:9px;background:#1a2332;color:#fff;
+         font-weight:700;cursor:pointer;font-size:13px}
+</style>
+</head>
+<body>
+<h1>Tanquinhos! · plantas do terreno</h1>
+<div class="sub">As 10 peças de vegetação usadas para montar o campo de batalha. Todas desenhadas em código — o jogo não usa nenhum arquivo de imagem.</div>
+<div class="grade" id="grade"></div>
+<button onclick="baixarTodas()">⬇ Baixar as 10 imagens em PNG</button>
+<footer id="rodape"></footer>
+
+<script>
+// ---- trechos copiados do jogo, para as plantas saírem idênticas ----
+const W = 960, H = 540;
+const clamp = (v,a,b) => v<a?a:(v>b?b:v);
+let rng = Math.random;
+const rand = (a,b) => a + rng()*(b-a);
+function mulberry32(a){
+  return function(){
+    a|=0; a = a+0x6D2B79F5|0;
+    let t = Math.imul(a^a>>>15, 1|a);
+    t = t+Math.imul(t^t>>>7, 61|t)^t;
+    return ((t^t>>>14)>>>0)/4294967296;
+  };
+}
+let ground = new Float32Array(W), trees = [], decor = [], wind = 0, ctx = null;
+function groundAt(x){
+  x = clamp(x, 0, W-1);
+  const i = Math.floor(x), f = x - i;
+  return ground[i]*(1-f) + ground[Math.min(i+1,W-1)]*f;
+}
+function slopeAngle(x){ return Math.atan2(groundAt(x+10)-groundAt(x-10), 20); }
+function blob(x, y, r){ ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill(); }
+
+const TREE_KINDS = ["redonda","redonda","pinheiro","alta","larga"];
+function makeTree(x){
+  const kind = TREE_KINDS[Math.floor(rand(0, TREE_KINDS.length))];
+  const sc = rand(0.94, 1.1);
+  const t = { x, kind, alive:true, sway: rand(0, Math.PI*2), lean: rand(-0.08, 0.08),
+              hue: Math.round(rand(104, 122)), sat: Math.round(rand(42, 50)), lit: Math.round(rand(30, 37)),
+              trunkLit: Math.round(rand(28, 34)),
+              fruit: rng() < 0.22 ? "#e74c3c" : null };
+  if(kind === "pinheiro"){ t.h = rand(72, 86)*sc; t.r = rand(20, 24)*sc; t.cy = t.h*0.72; t.cr = t.r*1.15; }
+  else if(kind === "alta"){ t.h = rand(80, 94)*sc; t.r = rand(17, 20)*sc; t.cy = t.h - t.r*0.2; t.cr = t.r; }
+  else if(kind === "larga"){ t.h = rand(46, 54)*sc; t.r = rand(28, 33)*sc; t.cy = t.h; t.cr = t.r*1.05; }
+  else { t.h = rand(58, 70)*sc; t.r = rand(22, 26)*sc; t.cy = t.h; t.cr = t.r; }
+  t.hpMax = Math.round(34 + t.r*1.5);
+  t.hp = t.hpMax;
+  t.stumpH = t.h * rand(0.17, 0.28);
+  t.stumpSeed = rand(0, 100);
+  return t;
+}
+const VERDES = ["#4a9b4e", "#3e8e41", "#57a851", "#46903f"];
+function vGreen(){ return VERDES[Math.floor(rand(0, VERDES.length))]; }
+function mkGrama(x){
+  const n = 4 + Math.floor(rand(0, 2)), hBase = rand(10, 15), blades = [];
+  for(let i=0;i<n;i++){
+    const sp = rand(-6, 6);
+    blades.push({ x0: sp*0.3, tx: sp, h: hBase*rand(0.8, 1.12), f: rand(0.7, 1.1) });
+  }
+  return { t:"grama", x, blades, c: vGreen(), w: rand(1.9, 2.3), sway: rand(0, Math.PI*2) };
+}
+function mkArbusto(x){
+  const n = 3, r0 = rand(9, 13), balls = [];
+  for(let i=0;i<n;i++) balls.push({ dx: rand(-r0*0.9, r0*0.9), dy: rand(-r0*0.35, 0), r: r0*rand(0.72, 1) });
+  return { t:"arbusto", x, balls, c: vGreen(),
+           berry: rng() < 0.28 ? "#e05c5c" : null, sway: rand(0, Math.PI*2) };
+}
+function mkPedra(x){
+  return { t:"pedra", x, rx: rand(4.5, 7.5), ry: rand(3, 4.8),
+           c: rng() < 0.5 ? "#9aa5ad" : "#8d979f", rot: rand(-0.3, 0.3) };
+}
+function drawTrees(){
+  const tnow = Date.now()/700;
+  for(const tr of trees){
+    if(!tr.alive){ if(tr.stump) drawStump(tr); continue; }
+    const gy = groundAt(tr.x);
+    const sw = Math.sin(tnow + tr.sway)*2.5 + wind*70;
+    const lean = tr.lean * tr.h * 0.35;
+    const tx = tr.x + lean + sw;
+    const green = `hsl(${tr.hue} ${tr.sat}% ${tr.lit}%)`;
+    const greenLo = `hsl(${tr.hue} ${tr.sat}% ${Math.max(14, tr.lit-9)}%)`;
+    ctx.strokeStyle = `hsl(26 36% ${tr.trunkLit}%)`;
+    ctx.lineWidth = Math.max(4.5, tr.r*0.3); ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(tr.x, gy);
+    const trunkTop = gy - tr.h + (tr.kind === "pinheiro" ? tr.h*0.12 : tr.r*0.35);
+    ctx.quadraticCurveTo(tr.x + lean*0.35 + sw*0.35, gy - tr.h*0.55, tx, trunkTop);
+    ctx.stroke();
+    ctx.fillStyle = green;
+    if(tr.kind === "pinheiro"){
+      for(let i=0;i<3;i++){
+        const f = i/2;
+        const cyT = gy - tr.h*(0.42 + f*0.52);
+        const halfW = tr.r*(1.25 - f*0.5), hT = tr.h*0.3;
+        const sx = tr.x + lean*(0.4 + f*0.6) + sw*(0.4 + f*0.6);
+        ctx.fillStyle = i === 1 ? greenLo : green;
+        ctx.beginPath();
+        ctx.moveTo(sx, cyT - hT); ctx.lineTo(sx + halfW, cyT); ctx.lineTo(sx - halfW, cyT);
+        ctx.closePath(); ctx.fill();
+      }
+    } else if(tr.kind === "alta"){
+      const cy2 = gy - tr.cy;
+      blob(tx, cy2, tr.r);
+      blob(tx - tr.r*0.5, cy2 + tr.r*0.55, tr.r*0.58);
+      ctx.fillStyle = greenLo;
+      blob(tx + tr.r*0.52, cy2 + tr.r*0.5, tr.r*0.52);
+    } else if(tr.kind === "larga"){
+      const cy2 = gy - tr.h;
+      blob(tx, cy2, tr.r*0.82);
+      blob(tx - tr.r*0.72, cy2 + tr.r*0.2, tr.r*0.62);
+      blob(tx + tr.r*0.72, cy2 + tr.r*0.18, tr.r*0.66);
+      ctx.fillStyle = greenLo;
+      blob(tx - tr.r*0.3, cy2 + tr.r*0.5, tr.r*0.55);
+      blob(tx + tr.r*0.34, cy2 + tr.r*0.52, tr.r*0.5);
+    } else {
+      const cy2 = gy - tr.h;
+      blob(tx, cy2, tr.r);
+      blob(tx - tr.r*0.55, cy2 + tr.r*0.35, tr.r*0.62);
+      ctx.fillStyle = greenLo;
+      blob(tx + tr.r*0.55, cy2 + tr.r*0.35, tr.r*0.62);
+    }
+    if(tr.kind !== "pinheiro"){
+      ctx.fillStyle = "rgba(255,255,255,.14)";
+      blob(tx - tr.r*0.3, gy - tr.cy - tr.r*0.32, tr.r*0.42);
+    }
+    if(tr.fruit){
+      ctx.fillStyle = tr.fruit;
+      for(let i=0;i<4;i++){
+        const a = tr.sway + i*1.9;
+        blob(tx + Math.cos(a)*tr.r*0.6, gy - tr.cy + Math.sin(a)*tr.r*0.5, 2.3);
+      }
+    }
+  }
+}
+function drawStump(tr){
+  const gy = groundAt(tr.x);
+  const h = tr.stumpH, w = Math.max(5, tr.r*0.32);
+  const j = Math.sin(tr.stumpSeed) * w*0.25;
+  ctx.fillStyle = `hsl(26 36% ${tr.trunkLit}%)`;
+  ctx.beginPath();
+  ctx.moveTo(tr.x - w*0.55, gy);
+  ctx.lineTo(tr.x - w*0.5,  gy - h*0.92);
+  ctx.lineTo(tr.x - w*0.2,  gy - h*0.62 - j);
+  ctx.lineTo(tr.x + w*0.05, gy - h - j*0.6);
+  ctx.lineTo(tr.x + w*0.3,  gy - h*0.7 + j);
+  ctx.lineTo(tr.x + w*0.52, gy - h*0.88);
+  ctx.lineTo(tr.x + w*0.55, gy);
+  ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = "rgba(0,0,0,.4)"; ctx.lineWidth = 1.5; ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(tr.x + w*0.02, gy - h*0.86);
+  ctx.lineTo(tr.x - w*0.12, gy - h*0.5);
+  ctx.lineTo(tr.x + w*0.08, gy - h*0.22);
+  ctx.stroke();
+  ctx.strokeStyle = "rgba(35,20,10,.55)"; ctx.lineWidth = 2.2;
+  ctx.beginPath();
+  ctx.moveTo(tr.x - w*0.46, gy - h*0.88);
+  ctx.lineTo(tr.x - w*0.18, gy - h*0.6 - j);
+  ctx.lineTo(tr.x + w*0.05, gy - h - j*0.6);
+  ctx.lineTo(tr.x + w*0.3,  gy - h*0.68 + j);
+  ctx.lineTo(tr.x + w*0.5,  gy - h*0.86);
+  ctx.stroke();
+}
+function drawDecor(){
+  const tnow = Date.now()/900;
+  for(const d of decor){
+    const gy = groundAt(d.x);
+    const sl = slopeAngle(d.x);
+    const sw = Math.sin(tnow + d.sway)*1.7 + wind*45;
+    ctx.save();
+    ctx.translate(d.x, gy + 1);
+    ctx.rotate(clamp(sl*0.42, -0.45, 0.45));
+    if(d.t === "grama"){
+      ctx.strokeStyle = d.c; ctx.lineWidth = d.w; ctx.lineCap = "round";
+      for(const b of d.blades){
+        ctx.beginPath(); ctx.moveTo(b.x0, 0);
+        ctx.quadraticCurveTo(b.x0 + (b.tx-b.x0)*0.4, -b.h*0.62, b.tx + sw*b.f, -b.h);
+        ctx.stroke();
+      }
+    } else if(d.t === "arbusto"){
+      ctx.fillStyle = d.c;
+      for(const b of d.balls) blob(b.dx + sw*0.25, b.dy - b.r*0.55, b.r);
+      ctx.fillStyle = "rgba(255,255,255,.13)";
+      const b0 = d.balls[0];
+      blob(b0.dx - b0.r*0.3 + sw*0.25, b0.dy - b0.r*0.95, b0.r*0.42);
+      if(d.berry){
+        ctx.fillStyle = d.berry;
+        for(const b of d.balls) blob(b.dx + sw*0.25 + b.r*0.3, b.dy - b.r*0.75, 1.7);
+      }
+    } else if(d.t === "pedra"){
+      ctx.rotate(d.rot);
+      ctx.fillStyle = d.c;
+      ctx.beginPath(); ctx.ellipse(0, -d.ry*0.75, d.rx, d.ry, 0, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = "rgba(255,255,255,.22)";
+      ctx.beginPath(); ctx.ellipse(-d.rx*0.25, -d.ry*1.08, d.rx*0.4, d.ry*0.38, 0, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+// ---- catálogo ----
+const X = 480, CHAO = 300;
+function arvoreDe(kind, semente){
+  rng = mulberry32(semente);
+  let t, tent = 0;
+  do { t = makeTree(X); tent++; } while(t.kind !== kind && tent < 500);
+  t.x = X; return t;
+}
+const ITENS = [
+  { nome:"Gramínea", desc:"Tufo de 4 a 5 folhas curvadas, 10 a 17px de altura. É a planta mais comum: 66% da vegetação rasteira.",
+    hit:false, zoom:2.6, mk:()=>{ rng = mulberry32(31); decor = [mkGrama(X)]; trees = []; } },
+  { nome:"Touceira", desc:"Tufos nascendo agrupados. Acontece em 22% dos pontos, para a grama não ficar espalhada por igual.",
+    hit:false, zoom:2.2, mk:()=>{ rng = mulberry32(77); decor = [mkGrama(X-11), mkGrama(X), mkGrama(X+10)]; trees = []; } },
+  { nome:"Arbusto", desc:"Três bolas sobrepostas de 9 a 13px de raio, com brilho no topo. Representa 23% da vegetação rasteira.",
+    hit:false, zoom:2.6, mk:()=>{ rng = mulberry32(5); let a; do { a = mkArbusto(X); } while(a.berry); decor = [a]; trees = []; } },
+  { nome:"Arbusto com frutinhas", desc:"Mesmo arbusto, mas 28% deles nascem com frutinhas vermelhas nas pontas.",
+    hit:false, zoom:2.6, mk:()=>{ rng = mulberry32(9); let a; do { a = mkArbusto(X); } while(!a.berry); decor = [a]; trees = []; } },
+  { nome:"Pedra", desc:"Seixo achatado com reflexo de luz, 9 a 15px. Não é planta, mas entra na mesma mistura do chão (11%).",
+    hit:false, zoom:3.4, mk:()=>{ rng = mulberry32(3); decor = [mkPedra(X)]; trees = []; } },
+  { nome:"Árvore redonda", desc:"Copa cheia em três bolas, 58 a 70px de altura. É a espécie mais comum (2 chances em 5).",
+    hit:true, mk:()=>{ decor = []; trees = [arvoreDe("redonda", 20260727)]; } },
+  { nome:"Pinheiro", desc:"Três saias triangulares empilhadas, 72 a 86px. A área de acerto fica mais baixa, acompanhando o cone.",
+    hit:true, mk:()=>{ decor = []; trees = [arvoreDe("pinheiro", 20260727)]; } },
+  { nome:"Árvore alta", desc:"Tronco esguio e copa pequena, 80 a 94px. A mais alta, mas também a mais fácil de derrubar.",
+    hit:true, mk:()=>{ decor = []; trees = [arvoreDe("alta", 20260727)]; } },
+  { nome:"Árvore larga", desc:"Baixa e espalhada, 46 a 54px de altura com copa de até 33px. É a mais resistente das quatro.",
+    hit:true, mk:()=>{ decor = []; trees = [arvoreDe("larga", 20260727)]; } },
+  { nome:"Toco", desc:"O que sobra quando uma árvore é derrubada: tronco lascado, rachado e chamuscado no topo.",
+    hit:false, zoom:2.6, mk:()=>{ decor = []; const t = arvoreDe("redonda", 4242); t.alive = false; t.stump = true; trees = [t]; } }
+];
+const grade = document.getElementById("grade");
+ITENS.forEach((item, i) => {
+  const card = document.createElement("div");
+  card.className = "card";
+  const cv = document.createElement("canvas");
+  cv.width = 380; cv.height = 420;
+  card.innerHTML = `<span class="num">${i+1}</span>`;
+  card.appendChild(cv);
+  card.insertAdjacentHTML("beforeend",
+    `<div class="nome">${item.nome}</div><div class="desc">${item.desc}</div>` +
+    `<span class="tag ${item.hit ? "bate" : "passa"}">${item.hit ? "🎯 o tiro bate nela" : "👻 o tiro atravessa"}</span>`);
+  grade.appendChild(card);
+  const g = cv.getContext("2d");
+  g.setTransform(2,0,0,2,0,0);
+  ctx = g;
+  for(let k=0;k<W;k++) ground[k] = CHAO;
+  item.mk();
+  const z = item.zoom || 1;                    // aproxima as peças miúdas
+  g.save();
+  g.translate(95, 170);
+  g.scale(z, z);
+  g.translate(-X, -CHAO);
+  drawTrees(); drawDecor();
+  g.restore();
+  g.strokeStyle = "#cfdde6"; g.lineWidth = 1;
+  g.beginPath(); g.moveTo(0, 170); g.lineTo(190, 170); g.stroke();
+  item.cv = cv;
+});
+document.getElementById("rodape").innerHTML =
+  "<b>Áreas de acerto:</b> só as quatro árvores bloqueiam tiro (cada uma com a área ajustada ao próprio formato) e podem ser derrubadas. " +
+  "Gramíneas, arbustos, pedras e o toco são só enfeite — o tiro passa direto por eles, mas somem quando uma explosão acontece por perto.<br><br>" +
+  "<b>Escala:</b> as peças rasteiras estão ampliadas 2 a 3 vezes para os detalhes aparecerem; as quatro árvores estão em tamanho real. " +
+  "As medidas em pixels de cada descrição são as do jogo (o tanque tem 50px de largura, para comparar).";
+function baixarTodas(){
+  ITENS.forEach((item, i) => {
+    const a = document.createElement("a");
+    a.download = String(i+1).padStart(2,"0") + "-" + item.nome.toLowerCase().replace(/[^a-z]+/g,"-").replace(/^-|-$/g,"") + ".png";
+    a.href = item.cv.toDataURL("image/png");
+    a.click();
+  });
+}
+</script>
+</body>
+</html>
