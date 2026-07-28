@@ -369,7 +369,7 @@ const VERDES = ["#4a9b4e", "#3e8e41", "#57a851", "#46903f"];
 function vGreen(){ return VERDES[Math.floor(rand(0, VERDES.length))]; }
 
 // ---- cenário distante: sorteia 1 dos 4 tipos por partida ----
-const BG_TIPOS = ["montanha","montes","arbustos"];
+const BG_TIPOS = ["montanha","montes","floresta"];
 function genBackdrop(){
   let soma = 0;
   for(let x=0;x<W;x++) soma += ground[x];
@@ -401,9 +401,43 @@ function genBackdrop(){
       x, w: rand(160, 250), h: rand(50, 92),
       skew: rand(-0.22, 0.22), ombro: rand(0.3, 0.52) }));
   } else {
-    espalhar(7 + Math.floor(rand(0, 5)), 72, 25, W-25, x => ({ x, r: rand(20, 33) }));
+    // floresta fechada: adiciona copas até o dossel cobrir a faixa alvo do horizonte
+    const alvo = rand(0.62, 0.82);
+    let guard = 0;
+    while(coberturaDossel(bg.itens) < alvo && guard++ < 400)
+      bg.itens.push(arvoreFloresta(rand(-25, W+25)));
+    bg.cobertura = coberturaDossel(bg.itens);
+    bg.itens.sort((a,b) => a.camada - b.camada || a.x - b.x);   // fundo antes da frente
+    return;
   }
   bg.itens.sort((a,b) => a.x - b.x);
+}
+// fração da largura da tela realmente coberta pelas copas (união dos intervalos)
+function coberturaDossel(itens){
+  if(!itens.length) return 0;
+  const iv = itens.map(a => [a.x - a.r, a.x + a.r]).sort((p, q) => p[0] - q[0]);
+  let total = 0, ini = iv[0][0], fim = iv[0][1];
+  for(let i=1;i<iv.length;i++){
+    if(iv[i][0] > fim){
+      total += Math.min(fim, W) - Math.max(ini, 0);
+      ini = iv[i][0]; fim = iv[i][1];
+    } else fim = Math.max(fim, iv[i][1]);
+  }
+  total += Math.min(fim, W) - Math.max(ini, 0);
+  return clamp(total, 0, W) / W;
+}
+function arvoreFloresta(x){
+  const camada = rng() < 0.45 ? 0 : 1;            // 0 = mata ao fundo, 1 = primeira fila
+  const r = camada === 0 ? rand(30, 50) : rand(24, 40);
+  const emerg = rng() < 0.18;                     // emergente: espia por cima do dossel
+  const alt = (camada === 0 ? rand(74, 116) : rand(44, 84)) * (emerg ? 1.45 : 1);
+  const lobos = [{ dx:0, dy:0, r: r*0.86 }];
+  const n = 4 + Math.floor(rand(0, 3));
+  for(let i=0;i<n;i++){
+    const a = rand(0, Math.PI*2), d = rand(r*0.34, r*0.72);
+    lobos.push({ dx: Math.cos(a)*d, dy: Math.sin(a)*d*0.55, r: r*rand(0.44, 0.72) });
+  }
+  return { x, r, camada, alt, emerg, lobos, lean: rand(-5, 5), tom: rand(-7, 7) };
 }
 // cume irregular em facetas retas, em vez de triângulo perfeito
 function perfilMontanha(){
@@ -1062,7 +1096,7 @@ const BG_CHAO = { topo:"#b3c8cd", base:"#9db6a3" };
 const BG_CORES = {   // tons lavados: sugerem distância atmosférica
   montanha: { corpo:"#93a7bd", luz:"#a8bbcd" },
   montes:   { corpo:"#8fae95", luz:"#a0bda5" },
-  arbustos: { corpo:"#90b092", luz:"#a3c0a4" }
+  floresta: { corpo:"#6f9a7a", luz:"#89b291", fundo:"#93b79b", tronco:"#7f8f83" }
 };
 function bgY(x){   // altura do horizonte distante em x
   const i = clamp(Math.round(x/8), 0, bg.perfil.length-1);
@@ -1160,16 +1194,22 @@ function drawBackdrop(){
   for(let x=8; x<=W; x+=8) ctx.lineTo(x, bgY(x));
   ctx.lineTo(W, H); ctx.lineTo(0, H);
   ctx.closePath(); ctx.fill();
-  // 3) vegetação: só o cenário de arbustos tem (montanha e montes ficam nus)
-  if(bg.tipo === "arbustos"){
+  // 3) vegetação: só a floresta tem (montanha e montes ficam nus)
+  if(bg.tipo === "floresta"){
     for(const a of bg.itens){
-      const b = bgY(a.x) + 3;
-      ctx.fillStyle = c.corpo;
-      blob(a.x, b - a.r*0.55, a.r*0.85);
-      blob(a.x - a.r*0.62, b - a.r*0.2, a.r*0.6);
-      blob(a.x + a.r*0.62, b - a.r*0.2, a.r*0.6);
-      ctx.fillStyle = c.luz;
-      blob(a.x - a.r*0.22, b - a.r*0.8, a.r*0.4);
+      const base = bgY(a.x) + 4, topo = base - a.alt;
+      if(a.camada === 1 || a.emerg){                 // tronco aparece nas da frente
+        ctx.strokeStyle = c.tronco;
+        ctx.lineWidth = Math.max(2.5, a.r*0.13); ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(a.x, base); ctx.lineTo(a.x + a.lean, topo + a.r*0.45);
+        ctx.stroke();
+      }
+      const cor = a.camada === 0 ? c.fundo : c.corpo;
+      ctx.fillStyle = cor;
+      for(const l of a.lobos) blob(a.x + l.dx, topo + l.dy, l.r);
+      ctx.fillStyle = a.camada === 0 ? "rgba(255,255,255,.16)" : c.luz;
+      blob(a.x - a.r*0.26, topo - a.r*0.3, a.r*0.42);   // luz batendo no dossel
     }
   }
   ctx.restore();
