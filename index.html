@@ -242,9 +242,10 @@ let camGlide = 0;          // frames seguindo o tanque da vez
 let pointers = new Map();  // dedos na tela (p/ pinça)
 let pinchPrev = null, panDrag = null;
 let trees = [];            // árvores destrutíveis
-let decor = [];            // gramíneas, arbustos, flores (sem colisão)
+let decor = [];            // gramíneas, arbustos e pedras (sem colisão)
 let birds = [];            // passarinhos que fogem das árvores derrubadas
 let bg = null, bgBase = 0; // cenário distante, atrás do terreno jogável
+let sol = { x: 870, y: 70, r: 34, fase: 0 };
 // esquadrilha de 3 caças: um único sobrevoo por partida
 let squad = null, squadAt = 0, squadDone = false, squadDelay = 0, squadDir = 1, squadY = 90;
 const FORMACAO = [ {dx:0, dy:0}, {dx:-40, dy:-21}, {dx:-40, dy:21} ];   // V clássico
@@ -297,8 +298,21 @@ function genTerrain(){
     ground[x] = clamp(h, H*0.3, H*0.9);    // teto: morro alto pode bloquear tiro | piso: tanque não fica atrás do HUD
   }
   flattenAt(110); flattenAt(W-110);
+  // nuvens cumulus: topo em bolhas, base achatada, tamanho e opacidade variados
   clouds = [];
-  for(let i=0;i<4;i++) clouds.push({x:rand(60,W-60), y:rand(40,150), s:rand(0.7,1.4), v:rand(0.05,0.15)});
+  const nC = 3 + Math.floor(rand(0, 3));
+  for(let i=0;i<nC;i++){
+    const larg = rand(34, 58), nl = 4 + Math.floor(rand(0, 3)), lobos = [];
+    for(let j=0;j<nl;j++){
+      const t = nl === 1 ? 0 : (j/(nl-1))*2 - 1;               // -1 (esq) .. 1 (dir)
+      lobos.push({ dx: t*larg + rand(-5, 5),
+                   dy: -(1 - Math.abs(t))*rand(4, 13) + rand(-2, 2),
+                   r: (1 - Math.abs(t)*0.3) * rand(15, 21) });
+    }
+    clouds.push({ x: rand(50, W-50), y: rand(38, 165), s: rand(0.65, 1.3),
+                  v: rand(0.04, 0.15), larg, lobos, a: rand(0.72, 0.96) });
+  }
+  sol = { x: rand(70, W-70), y: rand(52, 96), r: rand(30, 38), fase: rand(0, Math.PI*2) };
   // árvores salteadas (fora das áreas de nascimento, com espaço entre elas)
   trees = [];
   let tries = 0;
@@ -342,14 +356,12 @@ function genDecor(){
   decor = [];
   let x = rand(10, 30);
   while(x < W-6){
-    const roll = rng();
-    if(roll < 0.60)      decor.push(mkGrama(x));   // grama domina; o resto pontua o cenário
-    else if(roll < 0.75) decor.push(mkArbusto(x));
-    else if(roll < 0.86) decor.push(mkFlor(x));
-    else if(roll < 0.94) decor.push(mkPedra(x));
-    else                 decor.push(mkJunco(x));
+    const roll = rng();                            // só o que pertence a este bioma
+    if(roll < 0.66)      decor.push(mkGrama(x));
+    else if(roll < 0.89) decor.push(mkArbusto(x));
+    else                 decor.push(mkPedra(x));
     if(rng() < 0.22) decor.push(mkGrama(x + rand(-11, 11)));   // touceira ocasional
-    x += rand(30, 58);                                          // bem mais espaçado
+    x += rand(30, 58);
   }
 }
 // paleta enxuta: variação sutil, mantendo o cenário coeso
@@ -433,19 +445,9 @@ function mkArbusto(x){
   return { t:"arbusto", x, balls, c: vGreen(),
            berry: rng() < 0.28 ? "#e05c5c" : null, sway: rand(0, Math.PI*2) };
 }
-function mkFlor(x){
-  const cores = ["#ffffff", "#ffd93e", "#ff8fb1"];
-  return { t:"flor", x, h: rand(11, 16), c: cores[Math.floor(rand(0, cores.length))],
-           petals: 5, pr: rand(2.2, 2.8), lean: rand(-2, 2), sway: rand(0, Math.PI*2) };
-}
 function mkPedra(x){
   return { t:"pedra", x, rx: rand(4.5, 7.5), ry: rand(3, 4.8),
            c: rng() < 0.5 ? "#9aa5ad" : "#8d979f", rot: rand(-0.3, 0.3) };
-}
-function mkJunco(x){
-  const n = 3, stems = [];
-  for(let i=0;i<n;i++) stems.push({ dx: rand(-4, 4), h: rand(21, 30), tip: rng() < 0.5 });
-  return { t:"junco", x, stems, c: "#7d9b45", sway: rand(0, Math.PI*2) };
 }
 function flattenAt(cx){
   const y = ground[cx|0];
@@ -956,18 +958,8 @@ function draw(){
   const sky = ctx.createLinearGradient(0,0,0,H);
   sky.addColorStop(0,"#7ec8f5"); sky.addColorStop(0.7,"#cfeaff"); sky.addColorStop(1,"#f5e9c8");
   ctx.fillStyle = sky; ctx.fillRect(-25,-25,W+50,H+50);
-  // sol
-  ctx.fillStyle = "#ffe680"; ctx.beginPath(); ctx.arc(W-90, 70, 34, 0, Math.PI*2); ctx.fill();
-  // nuvens
-  ctx.fillStyle = "rgba(255,255,255,.85)";
-  for(const c of clouds){
-    c.x += c.v; if(c.x > W+80) c.x = -80;
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, 18*c.s, 0, Math.PI*2);
-    ctx.arc(c.x+20*c.s, c.y+4*c.s, 14*c.s, 0, Math.PI*2);
-    ctx.arc(c.x-20*c.s, c.y+5*c.s, 13*c.s, 0, Math.PI*2);
-    ctx.fill();
-  }
+  drawSol();
+  drawNuvens();
   drawSquad();
   drawBackdrop();
   // terreno
@@ -1013,6 +1005,60 @@ function draw(){
   ctx.globalAlpha = 1;
 }
 function blob(x, y, r){ ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill(); }
+function drawSol(){
+  const t = Date.now()/9000;
+  ctx.save();
+  // halo suave
+  const halo = ctx.createRadialGradient(sol.x, sol.y, sol.r*0.7, sol.x, sol.y, sol.r*3.6);
+  halo.addColorStop(0,   "rgba(255,229,150,.40)");
+  halo.addColorStop(0.45,"rgba(255,232,165,.14)");
+  halo.addColorStop(1,   "rgba(255,235,180,0)");
+  ctx.fillStyle = halo;
+  blob(sol.x, sol.y, sol.r*3.6);
+  // raios longos, girando devagar
+  ctx.globalAlpha = 0.16;
+  ctx.strokeStyle = "#fff0b8"; ctx.lineCap = "round";
+  for(let i=0;i<12;i++){
+    const a = t + sol.fase + i*Math.PI/6;
+    const r0 = sol.r*1.25, r1 = sol.r*(i%2 ? 1.9 : 2.5);
+    ctx.lineWidth = i%2 ? 3 : 5;
+    ctx.beginPath();
+    ctx.moveTo(sol.x + Math.cos(a)*r0, sol.y + Math.sin(a)*r0);
+    ctx.lineTo(sol.x + Math.cos(a)*r1, sol.y + Math.sin(a)*r1);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  // disco com volume
+  const disco = ctx.createRadialGradient(sol.x - sol.r*0.3, sol.y - sol.r*0.35, sol.r*0.15, sol.x, sol.y, sol.r);
+  disco.addColorStop(0, "#fffdf0");
+  disco.addColorStop(0.5, "#ffe98a");
+  disco.addColorStop(1, "#ffcf5e");
+  ctx.fillStyle = disco;
+  blob(sol.x, sol.y, sol.r);
+  ctx.restore();
+}
+function drawNuvens(){
+  for(const c of clouds){
+    c.x += c.v;
+    if(c.x > W + c.larg*c.s + 40) c.x = -c.larg*c.s - 40;
+    ctx.save();
+    ctx.globalAlpha = c.a;
+    // sombra da barriga
+    ctx.fillStyle = "#cfe0ee";
+    for(const l of c.lobos) blob(c.x + l.dx*c.s, c.y + (l.dy + 4)*c.s, l.r*c.s);
+    ctx.beginPath();
+    ctx.ellipse(c.x, c.y + 5*c.s, c.larg*c.s*0.92, 10*c.s, 0, 0, Math.PI*2); ctx.fill();
+    // corpo
+    ctx.fillStyle = "#fff";
+    for(const l of c.lobos) blob(c.x + l.dx*c.s, c.y + l.dy*c.s, l.r*c.s);
+    ctx.beginPath();
+    ctx.ellipse(c.x, c.y + 2*c.s, c.larg*c.s*0.9, 9*c.s, 0, 0, Math.PI*2); ctx.fill();
+    // luz do topo
+    ctx.fillStyle = "rgba(255,255,255,.9)";
+    for(const l of c.lobos) blob(c.x + (l.dx - l.r*0.2)*c.s, c.y + (l.dy - l.r*0.3)*c.s, l.r*0.55*c.s);
+    ctx.restore();
+  }
+}
 // ---- cenário distante (desenhado atrás do terreno jogável) ----
 // mesma paisagem em todos os tipos: só muda o que cresce nela
 const BG_CHAO = { topo:"#b3c8cd", base:"#9db6a3" };
@@ -1330,34 +1376,12 @@ function drawDecor(){
         ctx.fillStyle = d.berry;
         for(const b of d.balls) blob(b.dx + sw*0.25 + b.r*0.3, b.dy - b.r*0.75, 1.7);
       }
-    } else if(d.t === "flor"){
-      ctx.strokeStyle = "#5f8f3e"; ctx.lineWidth = 1.6; ctx.lineCap = "round";
-      ctx.beginPath(); ctx.moveTo(0, 0);
-      ctx.quadraticCurveTo(d.lean*0.5, -d.h*0.6, d.lean + sw, -d.h); ctx.stroke();
-      const fx = d.lean + sw, fy = -d.h;
-      ctx.fillStyle = d.c;
-      for(let i=0;i<d.petals;i++){
-        const a = i/d.petals*Math.PI*2;
-        blob(fx + Math.cos(a)*d.pr, fy + Math.sin(a)*d.pr, d.pr);
-      }
-      ctx.fillStyle = "#ffd23e";
-      blob(fx, fy, d.pr*0.6);
     } else if(d.t === "pedra"){
       ctx.rotate(d.rot);
       ctx.fillStyle = d.c;
       ctx.beginPath(); ctx.ellipse(0, -d.ry*0.75, d.rx, d.ry, 0, 0, Math.PI*2); ctx.fill();
       ctx.fillStyle = "rgba(255,255,255,.22)";
       ctx.beginPath(); ctx.ellipse(-d.rx*0.25, -d.ry*1.08, d.rx*0.4, d.ry*0.38, 0, 0, Math.PI*2); ctx.fill();
-    } else if(d.t === "junco"){
-      ctx.strokeStyle = d.c; ctx.lineWidth = 2; ctx.lineCap = "round";
-      for(const s of d.stems){
-        ctx.beginPath(); ctx.moveTo(s.dx, 0);
-        ctx.quadraticCurveTo(s.dx, -s.h*0.6, s.dx + sw*1.4, -s.h); ctx.stroke();
-        if(s.tip){
-          ctx.fillStyle = "#a97b4a";
-          ctx.beginPath(); ctx.ellipse(s.dx + sw*1.4, -s.h - 2.5, 2.1, 4.8, 0, 0, Math.PI*2); ctx.fill();
-        }
-      }
     }
     ctx.restore();
   }
