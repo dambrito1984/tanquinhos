@@ -380,13 +380,14 @@ function genBackdrop(){
     }
   };
   if(tipo === "montanha"){
-    espalhar(rng() < 0.4 ? 2 : 1, 330, W*0.16, W*0.84, x => ({
-      x, w: rand(250, 350), h: rand(120, 180), neve: rng() < 0.5,
-      arv: rng() < 0.6 ? matinho(3, 6, 0.3, 0.85) : null }));
+    espalhar(rng() < 0.45 ? 2 : 1, 320, W*0.16, W*0.84, x => ({
+      x, w: rand(260, 370), h: rand(125, 190),
+      neve: rng() < 0.55, snowH: rand(0.52, 0.68),
+      perfil: perfilMontanha() }));
   } else if(tipo === "montes"){
     espalhar(3 + Math.floor(rand(0, 3)), 165, 40, W-40, x => ({
-      x, w: rand(150, 240), h: rand(48, 88),
-      arv: rng() < 0.7 ? matinho(2, 4, 0.25, 0.8) : null }));
+      x, w: rand(160, 250), h: rand(50, 92),
+      skew: rand(-0.22, 0.22), ombro: rand(0.3, 0.52) }));
   } else if(tipo === "conifera"){
     espalhar(13 + Math.floor(rand(0, 7)), 26, 10, W-10, x => ({
       x, h: rand(42, 74), s: rand(0.85, 1.15) }));
@@ -395,10 +396,28 @@ function genBackdrop(){
   }
   bg.itens.sort((a,b) => a.x - b.x);
 }
-function matinho(min, max, t0, t1){
-  const n = min + Math.floor(rand(0, max-min+1)), arv = [];
-  for(let i=0;i<n;i++) arv.push({ t: (rng()<0.5?-1:1)*rand(t0, t1), s: rand(0.6, 1) });
-  return arv;
+// cume irregular em facetas retas, em vez de triângulo perfeito
+function perfilMontanha(){
+  const pico = rand(-0.16, 0.16);
+  const pts = [{ t:-1, h:0 }];
+  const nL = 2 + Math.floor(rand(0, 2));
+  for(let i=1;i<=nL;i++){
+    const f = i/(nL+1);
+    pts.push({ t: -1 + (pico+1)*f, h: clamp(Math.pow(f, 1.3) + rand(-0.08, 0.08), 0.04, 0.92) });
+  }
+  pts.push({ t: pico, h: 1 });
+  if(rng() < 0.45){                                   // cume secundário, mais baixo
+    const lado = rng() < 0.5 ? -1 : 1;
+    pts.push({ t: pico + lado*rand(0.16, 0.3), h: rand(0.62, 0.82) });
+  }
+  const nR = 2 + Math.floor(rand(0, 2));
+  for(let i=1;i<=nR;i++){
+    const f = i/(nR+1);
+    pts.push({ t: pico + (1-pico)*f, h: clamp(Math.pow(1-f, 1.25) + rand(-0.08, 0.08), 0.04, 0.92) });
+  }
+  pts.push({ t:1, h:0 });
+  pts.sort((a,b) => a.t - b.t);
+  return pts;
 }
 function mkGrama(x){
   const n = 4 + Math.floor(rand(0, 2)), hBase = rand(10, 15), blades = [];
@@ -998,10 +1017,10 @@ function blob(x, y, r){ ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fil
 // mesma paisagem em todos os tipos: só muda o que cresce nela
 const BG_CHAO = { topo:"#b3c8cd", base:"#9db6a3" };
 const BG_CORES = {   // tons lavados: sugerem distância atmosférica
-  montanha: { corpo:"#93a7bd", luz:"#a8bbcd", veg:"#7f9a87" },
-  montes:   { corpo:"#8fae95", luz:"#a0bda5", veg:"#78967e" },
-  conifera: { corpo:"#7d9d85", luz:"#8dab93", veg:"#7d9d85" },
-  arbustos: { corpo:"#90b092", luz:"#a3c0a4", veg:"#90b092" }
+  montanha: { corpo:"#93a7bd", luz:"#a8bbcd" },
+  montes:   { corpo:"#8fae95", luz:"#a0bda5" },
+  conifera: { corpo:"#7d9d85", luz:"#8dab93" },
+  arbustos: { corpo:"#90b092", luz:"#a3c0a4" }
 };
 function bgY(x){   // altura do horizonte distante em x
   const i = clamp(Math.round(x/8), 0, bg.perfil.length-1);
@@ -1013,47 +1032,89 @@ function pinheirinho(x, base, h, cor){
   ctx.beginPath(); ctx.moveTo(x, base-h); ctx.lineTo(x+w, base-h*0.45); ctx.lineTo(x-w, base-h*0.45); ctx.closePath(); ctx.fill();
   ctx.beginPath(); ctx.moveTo(x, base-h*0.72); ctx.lineTo(x+w*1.15, base); ctx.lineTo(x-w*1.15, base); ctx.closePath(); ctx.fill();
 }
+function ptM(m, p){                       // ponto do perfil -> coordenada de tela
+  const x = m.x + p.t*(m.w/2);
+  return { x, y: bgY(x) - p.h*m.h };
+}
+function drawMontanha(m, c){
+  const P = m.perfil, ini = ptM(m, P[0]), fim = ptM(m, P[P.length-1]);
+  // corpo em facetas
+  ctx.fillStyle = c.corpo;
+  ctx.beginPath();
+  ctx.moveTo(ini.x, ini.y + 8);
+  for(const p of P){ const q = ptM(m, p); ctx.lineTo(q.x, q.y); }
+  ctx.lineTo(fim.x, fim.y + 8);
+  for(let x = fim.x; x >= ini.x; x -= 10) ctx.lineTo(x, bgY(x) + 8);
+  ctx.closePath(); ctx.fill();
+  // encosta virada para o sol (do cume para a direita)
+  let iPico = 0;
+  for(let i=1;i<P.length;i++) if(P[i].h > P[iPico].h) iPico = i;
+  const pico = ptM(m, P[iPico]);
+  ctx.fillStyle = c.luz;
+  ctx.beginPath();
+  ctx.moveTo(pico.x, pico.y);
+  for(let i=iPico+1;i<P.length;i++){ const q = ptM(m, P[i]); ctx.lineTo(q.x, q.y); }
+  ctx.lineTo(fim.x, fim.y + 8);
+  ctx.lineTo(pico.x, bgY(pico.x) + 8);
+  ctx.closePath(); ctx.fill();
+  if(!m.neve) return;
+  // calota: recorta o perfil acima da linha de neve e fecha com dentes
+  const hS = m.snowH, topo = [];
+  for(let i=0;i<P.length-1;i++){
+    const a = P[i], b2 = P[i+1];
+    if(a.h >= hS) topo.push(a);
+    if((a.h < hS) !== (b2.h < hS)){
+      const f = (hS - a.h)/(b2.h - a.h);
+      topo.push({ t: a.t + (b2.t-a.t)*f, h: hS });
+    }
+  }
+  if(P[P.length-1].h >= hS) topo.push(P[P.length-1]);
+  if(topo.length < 2) return;
+  ctx.fillStyle = "#eef3f8";
+  ctx.beginPath();
+  const q0 = ptM(m, topo[0]);
+  ctx.moveTo(q0.x, q0.y);
+  for(const p of topo){ const q = ptM(m, p); ctx.lineTo(q.x, q.y); }
+  for(let i=topo.length-1;i>=0;i--){        // borda inferior irregular (língua de neve)
+    const p = topo[i], q = ptM(m, p);
+    const dente = ((i*37) % 5) * 0.018 * m.h;
+    ctx.lineTo(q.x, q.y + dente + m.h*0.03);
+  }
+  ctx.closePath(); ctx.fill();
+}
+function drawMonte(m, c){
+  const x0 = m.x - m.w/2, x1 = m.x + m.w/2;
+  const cx = m.x + m.skew*m.w*0.5;               // cume deslocado: colina assimétrica
+  const topo = bgY(cx) - m.h;
+  ctx.fillStyle = c.corpo;
+  ctx.beginPath();
+  ctx.moveTo(x0, bgY(x0) + 8);
+  ctx.bezierCurveTo(x0 + m.w*m.ombro*0.5, bgY(x0) - m.h*0.15,
+                    cx - m.w*0.26,        topo,
+                    cx,                   topo);
+  ctx.bezierCurveTo(cx + m.w*0.26,        topo,
+                    x1 - m.w*m.ombro*0.5, bgY(x1) - m.h*0.12,
+                    x1,                   bgY(x1) + 8);
+  for(let x = x1; x >= x0; x -= 10) ctx.lineTo(x, bgY(x) + 8);
+  ctx.closePath(); ctx.fill();
+  // lombada iluminada no alto
+  ctx.fillStyle = c.luz;
+  ctx.beginPath();
+  ctx.moveTo(cx, topo);
+  ctx.bezierCurveTo(cx + m.w*0.2, topo + m.h*0.05,
+                    x1 - m.w*0.3, bgY(x1) - m.h*0.32,
+                    x1 - m.w*0.12, bgY(x1) - m.h*0.1);
+  ctx.lineTo(cx + m.w*0.05, topo + m.h*0.22);
+  ctx.closePath(); ctx.fill();
+}
 function drawBackdrop(){
   if(!bg) return;
   const c = BG_CORES[bg.tipo];
   ctx.save();
   ctx.globalAlpha = 0.95;
-  // 1) relevo distante ATRÁS de tudo (silhueta só, sem base solta no ar)
-  if(bg.tipo === "montanha" || bg.tipo === "montes"){
-    for(const m of bg.itens){
-      const x0 = m.x - m.w/2, x1 = m.x + m.w/2;
-      ctx.fillStyle = c.corpo;
-      ctx.beginPath();
-      if(bg.tipo === "montanha"){
-        ctx.moveTo(x0, bgY(x0) + 8);
-        ctx.lineTo(m.x, bgY(m.x) - m.h);
-        ctx.lineTo(x1, bgY(x1) + 8);
-      } else {
-        ctx.moveTo(x0, bgY(x0) + 8);
-        ctx.quadraticCurveTo(m.x, bgY(m.x) - m.h*2, x1, bgY(x1) + 8);
-      }
-      for(let x = x1; x >= x0; x -= 10) ctx.lineTo(x, bgY(x) + 8);  // base acompanha o horizonte
-      ctx.closePath(); ctx.fill();
-      if(bg.tipo === "montanha"){
-        const b = bgY(m.x);
-        ctx.fillStyle = c.luz;                                       // encosta batida de sol
-        ctx.beginPath();
-        ctx.moveTo(m.x, b - m.h); ctx.lineTo(x1, bgY(x1) + 8); ctx.lineTo(m.x + m.w*0.08, bgY(m.x) + 8);
-        ctx.closePath(); ctx.fill();
-        if(m.neve){
-          const nh = m.h*0.3;
-          ctx.fillStyle = "#eaf0f6";
-          ctx.beginPath();
-          ctx.moveTo(m.x, b - m.h);
-          ctx.lineTo(m.x + nh*0.5,  b - m.h + nh);
-          ctx.lineTo(m.x + nh*0.18, b - m.h + nh*0.72);
-          ctx.lineTo(m.x - nh*0.16, b - m.h + nh*1.02);
-          ctx.lineTo(m.x - nh*0.46, b - m.h + nh*0.78);
-          ctx.closePath(); ctx.fill();
-        }
-      }
-    }
-  }
+  // 1) relevo distante ATRÁS de tudo
+  if(bg.tipo === "montanha")    for(const m of bg.itens) drawMontanha(m, c);
+  else if(bg.tipo === "montes") for(const m of bg.itens) drawMonte(m, c);
   // 2) chão distante: cobre as bases e serve de apoio para a vegetação
   const g = ctx.createLinearGradient(0, bgBase - 14, 0, H);
   g.addColorStop(0, BG_CHAO.topo); g.addColorStop(1, BG_CHAO.base);
@@ -1063,18 +1124,8 @@ function drawBackdrop(){
   for(let x=8; x<=W; x+=8) ctx.lineTo(x, bgY(x));
   ctx.lineTo(W, H); ctx.lineTo(0, H);
   ctx.closePath(); ctx.fill();
-  // 3) vegetação, plantada na linha do horizonte
-  if(bg.tipo === "montanha" || bg.tipo === "montes"){
-    for(const m of bg.itens){
-      if(!m.arv) continue;
-      for(const a of m.arv){
-        const dx = a.t*(m.w/2), xx = m.x + dx;
-        const alt = bg.tipo === "montanha" ? m.h*(1 - Math.abs(a.t)) : m.h*(1 - a.t*a.t);
-        const y = bgY(xx) - alt;
-        if(y < bgY(xx) - 4) pinheirinho(xx, y + 3, (bg.tipo==="montanha"?15:12)*a.s, c.veg);
-      }
-    }
-  } else if(bg.tipo === "conifera"){
+  // 3) vegetação (só nos cenários que a têm: montes e montanhas ficam nus)
+  if(bg.tipo === "conifera"){
     for(const t of bg.itens) pinheirinho(t.x, bgY(t.x) + 4, t.h*t.s, c.corpo);
   } else {
     for(const a of bg.itens){
