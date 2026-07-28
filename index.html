@@ -299,19 +299,26 @@ function genTerrain(){
     ground[x] = clamp(h, H*0.3, H*0.9);    // teto: morro alto pode bloquear tiro | piso: tanque não fica atrás do HUD
   }
   flattenAt(110); flattenAt(W-110);
-  // nuvens cumulus: topo em bolhas, base achatada, tamanho e opacidade variados
+  // nuvens: cúmulo fofo ou estrato esticado, com silhueta irregular
   clouds = [];
-  const nC = 3 + Math.floor(rand(0, 3));
+  const nC = 4 + Math.floor(rand(0, 3));
   for(let i=0;i<nC;i++){
-    const larg = rand(34, 58), nl = 4 + Math.floor(rand(0, 3)), lobos = [];
-    for(let j=0;j<nl;j++){
-      const t = nl === 1 ? 0 : (j/(nl-1))*2 - 1;               // -1 (esq) .. 1 (dir)
-      lobos.push({ dx: t*larg + rand(-5, 5),
-                   dy: -(1 - Math.abs(t))*rand(4, 13) + rand(-2, 2),
-                   r: (1 - Math.abs(t)*0.3) * rand(15, 21) });
+    const fofa = rng() < 0.68;
+    const larg = fofa ? rand(38, 62) : rand(70, 115);
+    const altMax = fofa ? rand(24, 36) : rand(11, 17);
+    const puffs = [];
+    const n = fofa ? 10 + Math.floor(rand(0, 7)) : 12 + Math.floor(rand(0, 8));
+    for(let j=0;j<n;j++){
+      const t = rand(-1, 1);                       // posição no eixo da nuvem
+      const meio = 1 - Math.abs(t)*0.62;           // afina para as pontas
+      puffs.push({ dx: t*larg,
+                   dy: -rand(0, altMax*meio) - altMax*0.12,
+                   r: (0.42 + meio*0.58) * (fofa ? rand(12, 19) : rand(7, 12)) });
     }
-    clouds.push({ x: rand(50, W-50), y: rand(38, 165), s: rand(0.65, 1.3),
-                  v: rand(0.04, 0.15), larg, lobos, a: rand(0.72, 0.96) });
+    puffs.sort((a,b) => a.dx - b.dx);
+    clouds.push({ x: rand(50, W-50), y: rand(36, 168), s: rand(0.7, 1.25),
+                  v: rand(0.04, 0.15) * (fofa ? 1 : 1.35), larg, altMax, puffs, fofa,
+                  a: rand(0.78, 0.97) });
   }
   sol = { x: rand(70, W-70), y: rand(52, 96), r: rand(30, 38), fase: rand(0, Math.PI*2) };
   // árvores salteadas (fora das áreas de nascimento, com espaço entre elas)
@@ -327,6 +334,7 @@ function genTerrain(){
   genDecor();
   genBackdrop();
   renderBackdropCache();
+  for(const c of clouds) renderCloudSprite(c);
   // sobrevoo da esquadrilha: hora sorteada (mesmo momento nos 2 aparelhos)
   squadDelay = rand(10000, 70000);
   squadDir = rng() < 0.5 ? 1 : -1;
@@ -1074,25 +1082,52 @@ function drawSol(){
   blob(sol.x, sol.y, sol.r);
   ctx.restore();
 }
+// cada nuvem vira uma estampa pronta: permite borda suavizada sem custo por quadro
+function renderCloudSprite(c){
+  const rMax = Math.max(...c.puffs.map(p => p.r));
+  const pad = rMax + 10;
+  const sw = Math.ceil(c.larg*2 + pad*2), sh = Math.ceil(c.altMax + rMax + pad + 14);
+  const cx = sw/2, base = sh - pad*0.7;            // base achatada da nuvem
+  const cvs = document.createElement("canvas");
+  cvs.width = sw*2; cvs.height = sh*2;
+  const g = cvs.getContext("2d");
+  g.setTransform(2, 0, 0, 2, 0, 0);
+  const bolhas = (dy, escala) => {
+    for(const p of c.puffs){
+      g.beginPath();
+      g.arc(cx + p.dx, base + p.dy + dy, p.r*escala, 0, Math.PI*2);
+      g.fill();
+    }
+    g.beginPath();                                  // barriga plana unindo as bolhas
+    g.ellipse(cx, base + dy - 2, c.larg + rMax*0.35, (c.fofa ? 9 : 6)*escala, 0, 0, Math.PI*2);
+    g.fill();
+  };
+  g.filter = "blur(1.6px)";                         // tira o contorno de círculo perfeito
+  g.fillStyle = "#b9cee0";  bolhas(5, 0.99);        // sombra da barriga
+  const grad = g.createLinearGradient(0, base - c.altMax - rMax, 0, base + 8);
+  grad.addColorStop(0,    "#ffffff");
+  grad.addColorStop(0.55, "#f4f9fd");
+  grad.addColorStop(1,    "#dee9f3");
+  g.fillStyle = grad;       bolhas(0, 1);           // corpo com volume
+  g.filter = "blur(2.4px)";
+  g.fillStyle = "rgba(255,255,255,.75)";            // luz do sol no topo
+  for(const p of c.puffs){
+    g.beginPath();
+    g.arc(cx + p.dx - p.r*0.18, base + p.dy - p.r*0.42, p.r*0.62, 0, Math.PI*2);
+    g.fill();
+  }
+  g.filter = "none";
+  c.sprite = cvs; c.sw = sw; c.sh = sh; c.sbase = base;
+}
 function drawNuvens(){
   for(const c of clouds){
     c.x += c.v;
-    if(c.x > W + c.larg*c.s + 40) c.x = -c.larg*c.s - 40;
+    const meia = c.sw*c.s/2;
+    if(c.x > W + meia + 20) c.x = -meia - 20;
+    if(!c.sprite) continue;
     ctx.save();
     ctx.globalAlpha = c.a;
-    // sombra da barriga
-    ctx.fillStyle = "#cfe0ee";
-    for(const l of c.lobos) blob(c.x + l.dx*c.s, c.y + (l.dy + 4)*c.s, l.r*c.s);
-    ctx.beginPath();
-    ctx.ellipse(c.x, c.y + 5*c.s, c.larg*c.s*0.92, 10*c.s, 0, 0, Math.PI*2); ctx.fill();
-    // corpo
-    ctx.fillStyle = "#fff";
-    for(const l of c.lobos) blob(c.x + l.dx*c.s, c.y + l.dy*c.s, l.r*c.s);
-    ctx.beginPath();
-    ctx.ellipse(c.x, c.y + 2*c.s, c.larg*c.s*0.9, 9*c.s, 0, 0, Math.PI*2); ctx.fill();
-    // luz do topo
-    ctx.fillStyle = "rgba(255,255,255,.9)";
-    for(const l of c.lobos) blob(c.x + (l.dx - l.r*0.2)*c.s, c.y + (l.dy - l.r*0.3)*c.s, l.r*0.55*c.s);
+    ctx.drawImage(c.sprite, c.x - meia, c.y - c.sbase*c.s, c.sw*c.s, c.sh*c.s);
     ctx.restore();
   }
 }
