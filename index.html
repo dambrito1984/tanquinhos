@@ -244,6 +244,7 @@ let pinchPrev = null, panDrag = null;
 let trees = [];            // árvores destrutíveis
 let decor = [];            // gramíneas, arbustos, flores (sem colisão)
 let birds = [];            // passarinhos que fogem das árvores derrubadas
+let bg = null, bgBase = 0; // cenário distante, atrás do terreno jogável
 // esquadrilha de 3 caças: um único sobrevoo por partida
 let squad = null, squadAt = 0, squadDone = false, squadDelay = 0, squadDir = 1, squadY = 90;
 const FORMACAO = [ {dx:0, dy:0}, {dx:-40, dy:-21}, {dx:-40, dy:21} ];   // V clássico
@@ -309,6 +310,7 @@ function genTerrain(){
     trees.push(makeTree(x));
   }
   genDecor();
+  genBackdrop();
   // sobrevoo da esquadrilha: hora sorteada (mesmo momento nos 2 aparelhos)
   squadDelay = rand(10000, 70000);
   squadDir = rng() < 0.5 ? 1 : -1;
@@ -357,6 +359,49 @@ function genDecor(){
 // paleta enxuta: variação sutil, mantendo o cenário coeso
 const VERDES = ["#4a9b4e", "#3e8e41", "#57a851", "#46903f"];
 function vGreen(){ return VERDES[Math.floor(rand(0, VERDES.length))]; }
+
+// ---- cenário distante: sorteia 1 dos 4 tipos por partida ----
+const BG_TIPOS = ["montanha","montes","conifera","arbustos"];
+function genBackdrop(){
+  let soma = 0;
+  for(let x=0;x<W;x++) soma += ground[x];
+  bgBase = soma/W + 6;                        // linha do horizonte distante
+  const tipo = BG_TIPOS[Math.floor(rand(0, BG_TIPOS.length))];
+  bg = { tipo, itens: [], perfil: [] };
+  // horizonte levemente ondulado (linha reta denuncia que é cenário)
+  const a1 = rand(7, 17), f1 = rand(1.2, 2.6), p1 = rand(0, Math.PI*2);
+  const a2 = rand(3, 8),  f2 = rand(3.5, 6.5), p2 = rand(0, Math.PI*2);
+  for(let x=0; x<=W; x+=8)
+    bg.perfil.push(a1*Math.sin(x/W*Math.PI*2*f1 + p1) + a2*Math.sin(x/W*Math.PI*2*f2 + p2));
+  if(tipo === "montanha"){
+    const n = rng() < 0.35 ? 2 : 1;
+    for(let i=0;i<n;i++){
+      const m = { x: rand(W*0.18, W*0.82), w: rand(230, 360), h: rand(115, 185),
+                  neve: rng() < 0.55, arv: null };
+      if(rng() < 0.65) m.arv = matinho(4, 8, 0.25, 0.9);
+      bg.itens.push(m);
+    }
+  } else if(tipo === "montes"){
+    const n = 3 + Math.floor(rand(0, 3));
+    for(let i=0;i<n;i++){
+      const m = { x: rand(30, W-30), w: rand(140, 240), h: rand(48, 92), arv: null };
+      if(rng() < 0.75) m.arv = matinho(3, 6, 0.2, 0.85);
+      bg.itens.push(m);
+    }
+  } else if(tipo === "conifera"){
+    const n = 16 + Math.floor(rand(0, 12));
+    for(let i=0;i<n;i++) bg.itens.push({ x: rand(6, W-6), h: rand(40, 76), s: rand(0.85, 1.15) });
+  } else {
+    const n = 10 + Math.floor(rand(0, 8));
+    for(let i=0;i<n;i++) bg.itens.push({ x: rand(16, W-16), r: rand(19, 34) });
+  }
+  bg.itens.sort((a,b) => a.x - b.x);
+}
+function matinho(min, max, t0, t1){
+  const n = min + Math.floor(rand(0, max-min+1)), arv = [];
+  for(let i=0;i<n;i++) arv.push({ t: (rng()<0.5?-1:1)*rand(t0, t1), s: rand(0.55, 1) });
+  return arv;
+}
 function mkGrama(x){
   const n = 4 + Math.floor(rand(0, 2)), hBase = rand(10, 15), blades = [];
   for(let i=0;i<n;i++){
@@ -907,6 +952,7 @@ function draw(){
     ctx.fill();
   }
   drawSquad();
+  drawBackdrop();
   // terreno
   const dirt = ctx.createLinearGradient(0, H*0.3, 0, H);
   dirt.addColorStop(0,"#8a6238"); dirt.addColorStop(1,"#5b3d22");
@@ -950,6 +996,90 @@ function draw(){
   ctx.globalAlpha = 1;
 }
 function blob(x, y, r){ ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI*2); ctx.fill(); }
+// ---- cenário distante (desenhado atrás do terreno jogável) ----
+const BG_CORES = {   // tons lavados: sugerem distância atmosférica
+  montanha: { chao:"#a7bacb", corpo:"#93a7bd", luz:"#a6b9cb", veg:"#7d9885" },
+  montes:   { chao:"#a4bea6", corpo:"#93b497", luz:"#a5c3a8", veg:"#7b9b81" },
+  conifera: { chao:"#a0b9a1", corpo:"#7d9d85", luz:"#8dab93", veg:"#7d9d85" },
+  arbustos: { chao:"#aac3a7", corpo:"#95b596", luz:"#a6c2a6", veg:"#95b596" }
+};
+function bgY(x){   // altura do horizonte distante em x
+  const i = clamp(Math.round(x/8), 0, bg.perfil.length-1);
+  return bgBase + bg.perfil[i];
+}
+function pinheirinho(x, base, h, cor){
+  ctx.fillStyle = cor;
+  const w = h*0.36;
+  ctx.beginPath(); ctx.moveTo(x, base-h); ctx.lineTo(x+w, base-h*0.45); ctx.lineTo(x-w, base-h*0.45); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(x, base-h*0.72); ctx.lineTo(x+w*1.15, base); ctx.lineTo(x-w*1.15, base); ctx.closePath(); ctx.fill();
+}
+function drawBackdrop(){
+  if(!bg) return;
+  const c = BG_CORES[bg.tipo];
+  ctx.save();
+  ctx.globalAlpha = 0.93;                       // leve névoa de distância
+  if(bg.tipo === "montanha"){
+    for(const m of bg.itens){
+      const b = bgY(m.x);
+      ctx.fillStyle = c.corpo;
+      ctx.beginPath();
+      ctx.moveTo(m.x - m.w/2, b); ctx.lineTo(m.x, b - m.h); ctx.lineTo(m.x + m.w/2, b);
+      ctx.closePath(); ctx.fill();
+      ctx.fillStyle = c.luz;                    // encosta iluminada
+      ctx.beginPath();
+      ctx.moveTo(m.x, b - m.h); ctx.lineTo(m.x + m.w/2, b); ctx.lineTo(m.x + m.w*0.1, b);
+      ctx.closePath(); ctx.fill();
+      if(m.neve){
+        const nh = m.h*0.3;
+        ctx.fillStyle = "#e9eff6";
+        ctx.beginPath();
+        ctx.moveTo(m.x, b - m.h);
+        ctx.lineTo(m.x + nh*0.5, b - m.h + nh);
+        ctx.lineTo(m.x + nh*0.18, b - m.h + nh*0.72);
+        ctx.lineTo(m.x - nh*0.16, b - m.h + nh*1.02);
+        ctx.lineTo(m.x - nh*0.46, b - m.h + nh*0.78);
+        ctx.closePath(); ctx.fill();
+      }
+      if(m.arv) for(const a of m.arv){          // vegetação na encosta
+        const dx = a.t*(m.w/2), y = b - m.h*(1 - Math.abs(a.t));
+        pinheirinho(m.x + dx, y + 2, 15*a.s, c.veg);
+      }
+    }
+  } else if(bg.tipo === "montes"){
+    for(const m of bg.itens){
+      const b = bgY(m.x);
+      ctx.fillStyle = c.corpo;
+      ctx.beginPath();
+      ctx.moveTo(m.x - m.w/2, b);
+      ctx.quadraticCurveTo(m.x, b - m.h*2, m.x + m.w/2, b);
+      ctx.closePath(); ctx.fill();
+      if(m.arv) for(const a of m.arv){
+        const dx = a.t*(m.w/2), y = b - m.h*(1 - a.t*a.t);
+        pinheirinho(m.x + dx, y + 2, 12*a.s, c.veg);
+      }
+    }
+  } else if(bg.tipo === "conifera"){
+    for(const t of bg.itens) pinheirinho(t.x, bgY(t.x) + 3, t.h*t.s, c.corpo);
+  } else {
+    for(const a of bg.itens){
+      const b = bgY(a.x);
+      ctx.fillStyle = c.corpo;
+      blob(a.x, b - a.r*0.35, a.r);
+      blob(a.x - a.r*0.7, b - a.r*0.1, a.r*0.66);
+      blob(a.x + a.r*0.7, b - a.r*0.1, a.r*0.66);
+      ctx.fillStyle = c.luz;
+      blob(a.x - a.r*0.25, b - a.r*0.7, a.r*0.45);
+    }
+  }
+  // chão distante por cima das bases, seguindo a linha ondulada
+  ctx.fillStyle = c.chao;
+  ctx.beginPath();
+  ctx.moveTo(0, bgY(0));
+  for(let x=8; x<=W; x+=8) ctx.lineTo(x, bgY(x));
+  ctx.lineTo(W, H); ctx.lineTo(0, H);
+  ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
 function drawBirds(){
   ctx.strokeStyle = "#33404f"; ctx.lineCap = "round";
   for(const b of birds){
