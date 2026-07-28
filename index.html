@@ -369,7 +369,7 @@ const VERDES = ["#4a9b4e", "#3e8e41", "#57a851", "#46903f"];
 function vGreen(){ return VERDES[Math.floor(rand(0, VERDES.length))]; }
 
 // ---- cenário distante: sorteia 1 dos 4 tipos por partida ----
-const BG_TIPOS = ["montanha","montes","conifera","arbustos"];
+const BG_TIPOS = ["montanha","montes","arbustos"];
 function genBackdrop(){
   let soma = 0;
   for(let x=0;x<W;x++) soma += ground[x];
@@ -400,9 +400,6 @@ function genBackdrop(){
     espalhar(3 + Math.floor(rand(0, 3)), 165, 40, W-40, x => ({
       x, w: rand(160, 250), h: rand(50, 92),
       skew: rand(-0.22, 0.22), ombro: rand(0.3, 0.52) }));
-  } else if(tipo === "conifera"){
-    espalhar(13 + Math.floor(rand(0, 7)), 26, 10, W-10, x => ({
-      x, h: rand(42, 74), s: rand(0.85, 1.15) }));
   } else {
     espalhar(7 + Math.floor(rand(0, 5)), 72, 25, W-25, x => ({ x, r: rand(20, 33) }));
   }
@@ -1065,18 +1062,11 @@ const BG_CHAO = { topo:"#b3c8cd", base:"#9db6a3" };
 const BG_CORES = {   // tons lavados: sugerem distância atmosférica
   montanha: { corpo:"#93a7bd", luz:"#a8bbcd" },
   montes:   { corpo:"#8fae95", luz:"#a0bda5" },
-  conifera: { corpo:"#7d9d85", luz:"#8dab93" },
   arbustos: { corpo:"#90b092", luz:"#a3c0a4" }
 };
 function bgY(x){   // altura do horizonte distante em x
   const i = clamp(Math.round(x/8), 0, bg.perfil.length-1);
   return bgBase + bg.perfil[i];
-}
-function pinheirinho(x, base, h, cor){
-  ctx.fillStyle = cor;
-  const w = h*0.36;
-  ctx.beginPath(); ctx.moveTo(x, base-h); ctx.lineTo(x+w, base-h*0.45); ctx.lineTo(x-w, base-h*0.45); ctx.closePath(); ctx.fill();
-  ctx.beginPath(); ctx.moveTo(x, base-h*0.72); ctx.lineTo(x+w*1.15, base); ctx.lineTo(x-w*1.15, base); ctx.closePath(); ctx.fill();
 }
 function ptM(m, p){                       // ponto do perfil -> coordenada de tela
   const x = m.x + p.t*(m.w/2);
@@ -1170,10 +1160,8 @@ function drawBackdrop(){
   for(let x=8; x<=W; x+=8) ctx.lineTo(x, bgY(x));
   ctx.lineTo(W, H); ctx.lineTo(0, H);
   ctx.closePath(); ctx.fill();
-  // 3) vegetação (só nos cenários que a têm: montes e montanhas ficam nus)
-  if(bg.tipo === "conifera"){
-    for(const t of bg.itens) pinheirinho(t.x, bgY(t.x) + 4, t.h*t.s, c.corpo);
-  } else {
+  // 3) vegetação: só o cenário de arbustos tem (montanha e montes ficam nus)
+  if(bg.tipo === "arbustos"){
     for(const a of bg.itens){
       const b = bgY(a.x) + 3;
       ctx.fillStyle = c.corpo;
