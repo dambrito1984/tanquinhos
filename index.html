@@ -403,15 +403,19 @@ function genBackdrop(){
       x, w: rand(160, 250), h: rand(50, 92),
       skew: rand(-0.22, 0.22), ombro: rand(0.3, 0.52) }));
   } else {
-    // mata fechada: planta até o dossel cobrir quase toda a linha do horizonte
-    const alvo = rand(0.95, 1.0);
-    let guard = 0;
-    while(coberturaDossel(bg.itens) < alvo && guard++ < 1500)
-      bg.itens.push(arvoreFloresta(rand(-25, W+25)));
-    const extra = Math.round(bg.itens.length * rand(0.35, 0.6));   // adensa o miolo
-    for(let i=0;i<extra;i++) bg.itens.push(arvoreFloresta(rand(-25, W+25)));
+    // mata fechada: fileiras regulares com jitter — passo menor que o raio garante
+    // que as copas sempre se toquem, sem vão de céu entre elas
+    const cfg = [ {r: rand(16,19), alt: rand(48,58)},
+                  {r: rand(14,17), alt: rand(36,44)},
+                  {r: rand(12,15), alt: rand(25,32)} ];
+    bg.faixas = cfg.map(k => k.alt*0.6);       // massa contínua sob cada fileira
+    for(let cam=0; cam<3; cam++){
+      const passo = cfg[cam].r*1.05;
+      for(let x = -30; x < W+30; x += passo)
+        bg.itens.push(arvoreFloresta(x + rand(-passo*0.3, passo*0.3), cam, cfg[cam].r, cfg[cam].alt));
+    }
     bg.cobertura = coberturaDossel(bg.itens);
-    bg.itens.sort((a,b) => a.camada - b.camada || a.x - b.x);   // fundo antes da frente
+    bg.itens.sort((a,b) => a.camada - b.camada);
     return;
   }
   bg.itens.sort((a,b) => a.x - b.x);
@@ -430,19 +434,16 @@ function coberturaDossel(itens){
   total += Math.min(fim, W) - Math.max(ini, 0);
   return clamp(total, 0, W) / W;
 }
-function arvoreFloresta(x){
-  const camada = Math.floor(rand(0, 3));          // 0 mata ao fundo, 1 meio, 2 primeira fila
-  const r = camada === 0 ? rand(12, 19) : camada === 1 ? rand(11, 17) : rand(10, 15);
-  const emerg = rng() < 0.09;                     // emergente: espia por cima do dossel
-  const base = camada === 0 ? rand(38, 58) : camada === 1 ? rand(27, 44) : rand(18, 33);
-  const alt = base * (emerg ? 1.55 : 1);
-  const lobos = [{ dx:0, dy:0, r: r*0.9 }];
-  const n = 3 + Math.floor(rand(0, 3));
-  for(let i=0;i<n;i++){
-    const a = rand(0, Math.PI*2), d = rand(r*0.32, r*0.68);
-    lobos.push({ dx: Math.cos(a)*d, dy: Math.sin(a)*d*0.55, r: r*rand(0.46, 0.74) });
+function arvoreFloresta(x, camada, rBase, altBase){
+  const r = rBase * rand(0.88, 1.14);
+  const emerg = rng() < 0.05;                     // poucas emergentes: o dossel é parelho
+  const alt = altBase * rand(0.92, 1.1) * (emerg ? 1.45 : 1);
+  const lobos = [{ dx:0, dy:0, r: r*0.95 }];
+  for(let i=0;i<3;i++){
+    const a = rand(0, Math.PI*2), d = rand(r*0.28, r*0.58);
+    lobos.push({ dx: Math.cos(a)*d, dy: Math.sin(a)*d*0.5, r: r*rand(0.52, 0.76) });
   }
-  return { x, r, camada, alt, emerg, lobos, lean: rand(-3, 3) };
+  return { x, r, camada, alt, emerg, lobos, lean: rand(-3, 3), brilho: rng() < 0.35 };
 }
 // cume irregular em facetas retas, em vez de triângulo perfeito
 function perfilMontanha(){
@@ -1215,20 +1216,38 @@ function drawBackdrop(){
   ctx.closePath(); ctx.fill();
   // 3) vegetação: só a floresta tem (montanha e montes ficam nus)
   if(bg.tipo === "floresta"){
-    for(const a of bg.itens){
-      const base = bgY(a.x) + 4, topo = base - a.alt;
-      if(a.camada === 2 || a.emerg){                 // tronco só aparece na fila da frente
-        ctx.strokeStyle = c.tronco;
-        ctx.lineWidth = Math.max(2, a.r*0.16); ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(a.x, base); ctx.lineTo(a.x + a.lean, topo + a.r*0.5);
-        ctx.stroke();
+    for(let cam=0; cam<3; cam++){
+      // massa contínua da fileira: fecha qualquer vão de céu entre as copas
+      ctx.fillStyle = c.camadas[cam];
+      ctx.beginPath();
+      ctx.moveTo(0, bgY(0) - bg.faixas[cam]);
+      for(let x=8; x<=W; x+=8) ctx.lineTo(x, bgY(x) - bg.faixas[cam]);
+      ctx.lineTo(W, H); ctx.lineTo(0, H);
+      ctx.closePath(); ctx.fill();
+      // copas por cima, dando o recorte irregular do topo
+      for(const a of bg.itens){
+        if(a.camada !== cam) continue;
+        const base = bgY(a.x) + 4, topo = base - a.alt;
+        if(cam === 2 || a.emerg){                    // tronco só na fila da frente
+          ctx.strokeStyle = c.tronco;
+          ctx.lineWidth = Math.max(2, a.r*0.16); ctx.lineCap = "round";
+          ctx.beginPath();
+          ctx.moveTo(a.x, base); ctx.lineTo(a.x + a.lean, topo + a.r*0.5);
+          ctx.stroke();
+        }
+        ctx.fillStyle = c.camadas[cam];
+        for(const l of a.lobos) blob(a.x + l.dx, topo + l.dy, l.r);
       }
-      ctx.fillStyle = c.camadas[a.camada];
-      for(const l of a.lobos) blob(a.x + l.dx, topo + l.dy, l.r);
-      if(a.camada === 2){                            // luz batendo no alto do dossel
+      if(cam === 2){                                 // luz do sol pincelada no dossel
+        ctx.save();
+        ctx.globalAlpha = 0.32;
         ctx.fillStyle = c.luz;
-        blob(a.x - a.r*0.28, topo - a.r*0.34, a.r*0.4);
+        for(const a of bg.itens){
+          if(a.camada !== 2 || !a.brilho) continue;   // só em algumas, senão vira pontilhado
+          const topo = bgY(a.x) + 4 - a.alt;
+          blob(a.x - a.r*0.28, topo - a.r*0.3, a.r*0.5);
+        }
+        ctx.restore();
       }
     }
   }
