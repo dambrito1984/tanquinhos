@@ -52,13 +52,64 @@
   #spleft.vazio { opacity:.45; }
   #hint { font-size:11px; color:#fffc; background:rgba(10,20,35,.6); padding:6px 10px; border-radius:8px; max-width:150px; text-align:center; }
 
-  .overlay { position:absolute; inset:0; background:rgba(8,14,26,.86); border-radius:12px; display:flex; flex-direction:column;
+  .overlay { position:absolute; inset:0; border-radius:12px; display:flex; flex-direction:column;
+             background:radial-gradient(ellipse at center, rgba(8,14,26,.42) 0%, rgba(6,11,22,.9) 80%);
              align-items:center; justify-content:center; gap:14px; color:#fff; text-align:center; padding:20px; z-index:10;
              overflow-y:auto; }
-  .overlay h1 { font-size:clamp(28px,6vw,46px); }
+  .overlay h1 { font-size:clamp(24px,5.2vw,36px); line-height:1.15; }
   .overlay p { opacity:.85; font-size:14px; line-height:1.5; max-width:420px; }
   .bigbtn { padding:14px 30px; font-size:18px; background:linear-gradient(180deg,#ffd23e,#ffb52e); color:#402; box-shadow:0 4px 0 #b57e00; }
   .bigbtn:active { transform:translateY(3px); box-shadow:0 1px 0 #b57e00; }
+
+  /* ---- painel das telas ---- */
+  .painel { width:min(93vw, 440px); padding:22px 24px 18px;
+            background:linear-gradient(165deg, rgba(41,60,93,.95), rgba(15,25,43,.97));
+            border:1px solid rgba(255,255,255,.14); border-radius:24px;
+            box-shadow:0 22px 60px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.1);
+            display:flex; flex-direction:column; align-items:center; gap:14px; }
+  .painel.largo { width:min(95vw, 700px); }
+  .marca { display:flex; align-items:center; gap:12px; }
+  .marca svg { width:78px; height:auto; flex:none; filter:drop-shadow(0 4px 6px rgba(0,0,0,.45)); }
+  .titulo { font-size:clamp(28px,6.6vw,40px); font-weight:900; letter-spacing:-.5px; line-height:1;
+            background:linear-gradient(180deg,#fff 25%,#ffd23e 96%);
+            -webkit-background-clip:text; background-clip:text;
+            -webkit-text-fill-color:transparent; color:transparent;
+            filter:drop-shadow(0 3px 0 rgba(0,0,0,.32)); }
+  .lema { font-size:13px; line-height:1.5; opacity:.8; max-width:330px; margin-top:-4px; }
+  .bloco { width:100%; background:rgba(0,0,0,.24); border-radius:15px; padding:11px 13px;
+           border:1px solid rgba(255,255,255,.07); }
+  .bloco .rot { display:block; font-size:10px; letter-spacing:1.4px; text-transform:uppercase;
+                opacity:.6; margin-bottom:8px; font-weight:700; }
+  .botoes { display:flex; flex-direction:column; gap:9px; width:100%; }
+  .menubtn { display:flex; align-items:center; gap:13px; width:100%; padding:12px 16px;
+             border-radius:15px; text-align:left; color:#eaf2ff;
+             background:linear-gradient(180deg,#3f5680,#2a3a58);
+             box-shadow:0 4px 0 #1a2740, 0 8px 20px rgba(0,0,0,.32); }
+  .menubtn:active { transform:translateY(3px); box-shadow:0 1px 0 #1a2740; }
+  .menubtn.destaque { background:linear-gradient(180deg,#ffd84a,#ffb52e); color:#3d2800;
+                      box-shadow:0 4px 0 #b57e00, 0 10px 24px rgba(255,182,46,.22); }
+  .menubtn.destaque:active { box-shadow:0 1px 0 #b57e00; }
+  .menubtn .ic { font-size:23px; line-height:1; flex:none; }
+  .menubtn .txt { font-size:16px; font-weight:800; line-height:1.15; }
+  .menubtn .txt small { display:block; font-size:11px; font-weight:600; opacity:.72; margin-top:2px; }
+  .rodapinho { font-size:11px; opacity:.5; letter-spacing:.3px; }
+  /* celular em pé: o canvas fica baixinho, então as telas cobrem o aparelho todo */
+  @media (orientation:portrait) and (max-width:700px){
+    .overlay { position:fixed; inset:0; border-radius:0;
+               background:radial-gradient(ellipse at center, rgba(8,14,26,.66) 0%, rgba(6,11,22,.95) 80%); }
+  }
+  /* tela baixa (celular deitado): painel compacto para não precisar rolar */
+  @media (max-height:470px){
+    .painel { padding:14px 18px 12px; gap:9px; }
+    .marca svg { width:52px; }
+    .lema, .rodapinho { display:none; }
+    .menubtn { padding:9px 13px; }
+    .menubtn .txt { font-size:14px; }
+    .menubtn .txt small { display:none; }
+    .bloco { padding:8px 11px; }
+    .chbtn { padding:8px 6px; }
+    .chbtn .chicon { font-size:21px; }
+  }
   .hidden { display:none !important; }
   #joinrow { display:flex; gap:8px; align-items:center; }
   #codein { width:130px; padding:12px; font-size:20px; text-align:center; border-radius:10px; border:none;
@@ -137,41 +188,80 @@
   </div>
 
   <div class="overlay" id="menu">
-    <h1>Tanquinhos! 💥</h1>
-    <p>Aquela guerrinha de tanques do caderno, agora de verdade.<br>
-       Arraste para mirar (tipo estilingue), solte para atirar.<br>
-       O terreno é destruído de verdade — cuidado para não ficar preso na cratera! 🕳️</p>
-    <div class="chchips">Dificuldade da CPU:
-      <button class="btn chchip" data-dif="facil" title="Fácil">😊</button>
-      <button class="btn chchip sel" data-dif="normal" title="Normal">😐</button>
-      <button class="btn chchip" data-dif="dificil" title="Difícil">😈</button>
+    <div class="painel">
+      <div class="marca">
+        <svg viewBox="0 -10 70 50" aria-hidden="true">
+          <ellipse cx="35" cy="36" rx="26" ry="3.2" fill="rgba(0,0,0,.4)"/>
+          <rect x="7" y="23" width="56" height="11" rx="5.5" fill="#242424"/>
+          <circle cx="14" cy="28.5" r="4.6" fill="#5a5a5a"/><circle cx="14" cy="28.5" r="1.8" fill="#8a8a8a"/>
+          <circle cx="25" cy="29" r="3.2" fill="#5a5a5a"/><circle cx="35" cy="29" r="3.2" fill="#5a5a5a"/>
+          <circle cx="45" cy="29" r="3.2" fill="#5a5a5a"/>
+          <circle cx="56" cy="28.5" r="4.6" fill="#5a5a5a"/><circle cx="56" cy="28.5" r="1.8" fill="#8a8a8a"/>
+          <rect x="13" y="14" width="44" height="12" rx="5" fill="#4a94ff"/>
+          <rect x="13" y="14" width="44" height="5" rx="4" fill="#6fb0ff"/>
+          <circle cx="30" cy="14" r="9" fill="#4a94ff"/>
+          <circle cx="27" cy="11" r="8.4" fill="#63a6ff"/>
+          <ellipse cx="27" cy="10" rx="3.4" ry="2.2" fill="#2f6dc4"/>
+          <rect x="30" y="1" width="30" height="6" rx="3" fill="#3a3a3a" transform="rotate(-16 30 4)"/>
+          <rect x="55" y="-3.5" width="4" height="8" rx="1" fill="#1b1b1b" transform="rotate(-16 30 4)"/>
+        </svg>
+        <h1 class="titulo">TANQUINHOS!</h1>
+      </div>
+      <p class="lema">Aquela guerrinha de tanques do caderno — agora de verdade, com o terreno explodindo de vez.</p>
+      <div class="bloco">
+        <span class="rot">Dificuldade da CPU</span>
+        <div class="chchips">
+          <button class="btn chchip" data-dif="facil" title="Fácil">😊</button>
+          <button class="btn chchip sel" data-dif="normal" title="Normal">😐</button>
+          <button class="btn chchip" data-dif="dificil" title="Difícil">😈</button>
+        </div>
+      </div>
+      <div class="botoes">
+        <button class="btn menubtn destaque" id="btn1p">
+          <span class="ic">🤖</span><span class="txt">1 Jogador<small>partida contra o computador</small></span>
+        </button>
+        <button class="btn menubtn" id="btn2p">
+          <span class="ic">👥</span><span class="txt">2 Jogadores<small>revezando no mesmo aparelho</small></span>
+        </button>
+        <button class="btn menubtn" id="btnonline">
+          <span class="ic">🌐</span><span class="txt">Jogar online<small>cada um no seu aparelho, por código</small></span>
+        </button>
+      </div>
+      <div class="rodapinho">arraste para mirar · solte para atirar</div>
     </div>
-    <button class="btn bigbtn" id="btn1p">🤖 1 Jogador (vs CPU)</button>
-    <button class="btn bigbtn" id="btn2p">👥 2 Jogadores</button>
-    <button class="btn bigbtn" id="btnonline">🌐 Jogar online</button>
   </div>
 
   <div class="overlay hidden" id="onlinemenu">
-    <h1>🌐 Jogar online</h1>
-    <p>Cada um no seu aparelho! Um <b>cria a sala</b> e fala o código;<br>o outro <b>digita o código</b> para entrar.</p>
-    <div class="chchips">Seu tanque:
-      <button class="btn chchip sel" data-chc="padrao" title="Padrão">⚙️</button>
-      <button class="btn chchip" data-chc="rodoes" title="Rodões">🛞</button>
-      <button class="btn chchip" data-chc="blindado" title="Blindado">🛡️</button>
-      <button class="btn chchip" data-chc="turbo" title="Turbo">🏎️</button>
-      <button class="btn chchip" data-chc="medico" title="Médico">🚑</button>
-      <button class="btn chchip" data-chc="sniper" title="Sniper">🔭</button>
+    <div class="painel">
+      <h1>🌐 Jogar online</h1>
+      <p class="lema">Um <b>cria a sala</b> e fala o código; o outro <b>digita o código</b> para entrar. Funciona em redes diferentes.</p>
+      <div class="bloco">
+        <span class="rot">Seu tanque</span>
+        <div class="chchips">
+          <button class="btn chchip sel" data-chc="padrao" title="Padrão">⚙️</button>
+          <button class="btn chchip" data-chc="rodoes" title="Rodões">🛞</button>
+          <button class="btn chchip" data-chc="blindado" title="Blindado">🛡️</button>
+          <button class="btn chchip" data-chc="turbo" title="Turbo">🏎️</button>
+          <button class="btn chchip" data-chc="medico" title="Médico">🚑</button>
+          <button class="btn chchip" data-chc="sniper" title="Sniper">🔭</button>
+        </div>
+      </div>
+      <div class="botoes">
+        <button class="btn menubtn destaque" id="btncreate">
+          <span class="ic">🏠</span><span class="txt">Criar sala<small>você recebe um código de 4 letras</small></span>
+        </button>
+      </div>
+      <div id="joinrow">
+        <input id="codein" maxlength="4" placeholder="CÓDIGO" autocomplete="off" autocapitalize="characters">
+        <button class="btn bigbtn" id="btnjoin">Entrar</button>
+      </div>
+      <div id="netstatus"></div>
+      <button class="btn backbtn" id="btnback">← Voltar</button>
     </div>
-    <button class="btn bigbtn" id="btncreate">🏠 Criar sala</button>
-    <div id="joinrow">
-      <input id="codein" maxlength="4" placeholder="CÓDIGO" autocomplete="off" autocapitalize="characters">
-      <button class="btn bigbtn" id="btnjoin">Entrar</button>
-    </div>
-    <div id="netstatus"></div>
-    <button class="btn backbtn" id="btnback">← Voltar</button>
   </div>
 
   <div class="overlay hidden" id="chassismenu">
+    <div class="painel largo">
     <h1 id="chtitle">Escolha seu tanque</h1>
     <div id="chgrid">
       <button class="btn chbtn" data-ch="padrao"><span class="chicon">⚙️</span><b>Padrão</b><small>Equilibrado em tudo</small></button>
@@ -181,12 +271,19 @@
       <button class="btn chbtn" data-ch="medico"><span class="chicon">🚑</span><b>Médico</b><small>Cura +20 de vida<br>mas perde o tiro do turno</small></button>
       <button class="btn chbtn" data-ch="sniper"><span class="chicon">🔭</span><b>Sniper</b><small>Enxerga a trajetória<br>quase 2× mais longe<br>−20% de dano, sem especiais</small></button>
     </div>
+    </div>
   </div>
 
   <div class="overlay hidden" id="gameover">
-    <h1 id="gotitle">🏆</h1>
-    <p id="gotext"></p>
-    <button class="btn bigbtn" id="btnagain">🔄 Jogar de novo</button>
+    <div class="painel">
+      <h1 id="gotitle">🏆</h1>
+      <p id="gotext"></p>
+      <div class="botoes">
+        <button class="btn menubtn destaque" id="btnagain">
+          <span class="ic">🔄</span><span class="txt">Jogar de novo<small>mesmo modo, mapa novo</small></span>
+        </button>
+      </div>
+    </div>
   </div>
 </div></div>
 
