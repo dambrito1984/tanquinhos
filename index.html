@@ -264,6 +264,21 @@ let birds = [];            // passarinhos que fogem das árvores derrubadas
 let bg = null, bgBase = 0; // cenário distante, atrás do terreno jogável
 let bgCache = null;        // cenário é estático: desenha uma vez, depois só copia
 let sol = { x: 870, y: 70, r: 34, fase: 0 };
+let estrelas = [];
+// hora do dia: sorteada por partida, 1/3 para cada
+const PERIODOS = {
+  manha: { nome:"🌅 Manhã", ceu:["#7fbfe8","#c6e4f6","#ffd9ae"],
+           disco:["#fffdf2","#ffe6a0","#ffc070"], halo:"rgba(255,206,150,.42)",
+           tint:"rgba(255,226,196,.22)" },
+  tarde: { nome:"☀️ Tarde", ceu:["#7ec8f5","#cfeaff","#f5e9c8"],
+           disco:["#fffdf0","#ffe98a","#ffcf5e"], halo:"rgba(255,229,150,.40)",
+           tint:null },
+  noite: { nome:"🌙 Noite", ceu:["#25355f","#3d5480","#6c7fa0"],
+           lua:true, halo:"rgba(198,216,255,.30)",
+           tint:"rgba(84,108,170,.62)" }
+};
+const PER_KEYS = Object.keys(PERIODOS);
+let periodo = PERIODOS.tarde;
 let serie = [0, 0];        // vitórias acumuladas na sequência de partidas
 let shocks = [];           // anéis de onda de choque
 let debris = [];           // pedaços do tanque voando
@@ -342,7 +357,14 @@ function genTerrain(){
                   v: rand(0.04, 0.15) * (fofa ? 1 : 1.35), larg, altMax, puffs, fofa,
                   a: rand(0.78, 0.97) });
   }
-  sol = { x: rand(70, W-70), y: rand(52, 96), r: rand(30, 38), fase: rand(0, Math.PI*2) };
+  periodo = PERIODOS[PER_KEYS[Math.floor(rand(0, PER_KEYS.length))]];
+  // de manhã o sol nasce baixo; de tarde fica alto; a lua vem alta também
+  sol = { x: rand(70, W-70), y: periodo === PERIODOS.manha ? rand(105, 150) : rand(48, 92),
+          r: rand(30, 38), fase: rand(0, Math.PI*2) };
+  estrelas = [];
+  if(periodo.lua)
+    for(let i=0;i<80;i++)
+      estrelas.push({ x: rand(0, W), y: rand(4, H*0.62), r: rand(0.5, 1.7), f: rand(0, Math.PI*2) });
   // árvores salteadas (fora das áreas de nascimento, com espaço entre elas)
   trees = [];
   let tries = 0;
@@ -1154,9 +1176,10 @@ function draw(){
   if(shake > 0.5){ ctx.translate(rand(-shake,shake)/cam.z, rand(-shake,shake)/cam.z); shake *= 0.85; }
   // céu
   const sky = ctx.createLinearGradient(0,0,0,H);
-  sky.addColorStop(0,"#7ec8f5"); sky.addColorStop(0.7,"#cfeaff"); sky.addColorStop(1,"#f5e9c8");
+  sky.addColorStop(0, periodo.ceu[0]); sky.addColorStop(0.7, periodo.ceu[1]); sky.addColorStop(1, periodo.ceu[2]);
   ctx.fillStyle = sky; ctx.fillRect(-25,-25,W+50,H+50);
-  drawSol();
+  drawEstrelas();
+  if(periodo.lua) drawLua(); else drawSol();
   drawNuvens();
   drawSquad();
   if(bgCache) ctx.drawImage(bgCache, 0, 0, W, H); else drawBackdrop();
@@ -1218,6 +1241,14 @@ function draw(){
     ctx.fillText(f.txt, f.x, f.y);
   }
   ctx.globalAlpha = 1;
+  // luz da hora do dia, banhando a cena inteira
+  if(periodo.tint){
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalCompositeOperation = "multiply";
+    ctx.fillStyle = periodo.tint;
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = "source-over";
+  }
   // clarão da explosão, por cima de tudo e sem seguir a câmera
   if(flash > 0){
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1231,7 +1262,7 @@ function drawSol(){
   ctx.save();
   // halo suave
   const halo = ctx.createRadialGradient(sol.x, sol.y, sol.r*0.7, sol.x, sol.y, sol.r*3.6);
-  halo.addColorStop(0,   "rgba(255,229,150,.40)");
+  halo.addColorStop(0,   periodo.halo);
   halo.addColorStop(0.45,"rgba(255,232,165,.14)");
   halo.addColorStop(1,   "rgba(255,235,180,0)");
   ctx.fillStyle = halo;
@@ -1251,11 +1282,41 @@ function drawSol(){
   ctx.globalAlpha = 1;
   // disco com volume
   const disco = ctx.createRadialGradient(sol.x - sol.r*0.3, sol.y - sol.r*0.35, sol.r*0.15, sol.x, sol.y, sol.r);
-  disco.addColorStop(0, "#fffdf0");
-  disco.addColorStop(0.5, "#ffe98a");
-  disco.addColorStop(1, "#ffcf5e");
+  disco.addColorStop(0, periodo.disco[0]);
+  disco.addColorStop(0.5, periodo.disco[1]);
+  disco.addColorStop(1, periodo.disco[2]);
   ctx.fillStyle = disco;
   blob(sol.x, sol.y, sol.r);
+  ctx.restore();
+}
+function drawLua(){
+  ctx.save();
+  const halo = ctx.createRadialGradient(sol.x, sol.y, sol.r*0.8, sol.x, sol.y, sol.r*3.2);
+  halo.addColorStop(0, periodo.halo);
+  halo.addColorStop(1, "rgba(198,216,255,0)");
+  ctx.fillStyle = halo;
+  blob(sol.x, sol.y, sol.r*3.2);
+  const disco = ctx.createRadialGradient(sol.x - sol.r*0.3, sol.y - sol.r*0.32, sol.r*0.2, sol.x, sol.y, sol.r);
+  disco.addColorStop(0, "#ffffff");
+  disco.addColorStop(1, "#dbe3f2");
+  ctx.fillStyle = disco;
+  blob(sol.x, sol.y, sol.r);
+  ctx.fillStyle = "rgba(148,164,198,.42)";              // crateras
+  blob(sol.x - sol.r*0.32, sol.y - sol.r*0.18, sol.r*0.21);
+  blob(sol.x + sol.r*0.26, sol.y + sol.r*0.30, sol.r*0.15);
+  blob(sol.x + sol.r*0.12, sol.y - sol.r*0.44, sol.r*0.11);
+  blob(sol.x - sol.r*0.12, sol.y + sol.r*0.5,  sol.r*0.09);
+  ctx.restore();
+}
+function drawEstrelas(){
+  if(!estrelas.length) return;
+  const t = Date.now()/620;
+  ctx.save();
+  ctx.fillStyle = "#fff";
+  for(const e of estrelas){
+    ctx.globalAlpha = 0.35 + 0.45*Math.abs(Math.sin(t + e.f));   // cintilação
+    blob(e.x, e.y, e.r);
+  }
   ctx.restore();
 }
 // cada nuvem vira uma estampa pronta: permite borda suavizada sem custo por quadro
@@ -2117,6 +2178,7 @@ function startOnlineGame(seed, w, first, ch){
   document.getElementById("onlinemenu").classList.add("hidden");
   document.getElementById("gameover").classList.add("hidden");
   startTurn();
+  setTimeout(() => toast(periodo.nome, 1600), 1400);
 }
 function handleMsg(m){
   if(!m || !m.type) return;
@@ -2211,6 +2273,7 @@ function newGame(cpu){
   document.getElementById("menu").classList.add("hidden");
   document.getElementById("gameover").classList.add("hidden");
   startTurn();
+  setTimeout(() => toast(periodo.nome, 1600), 1400);
 }
 document.getElementById("btn1p").addEventListener("click", () => {
   audio(); zerarSerie();
