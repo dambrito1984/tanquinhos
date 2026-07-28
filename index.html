@@ -557,6 +557,30 @@ function tankPhysics(t){
     }
   } else { t.y = gy; t.vy = 0; t.fallFrom = null; }
 }
+const LIMIAR_QUEBRA = 0.2;    // abaixo disso a esteira para de funcionar
+// esteira quebra abaixo de 20% de vida (e volta a andar se o Médico consertar)
+function checarEsteira(t){
+  if(!t.alive){ t.quebrado = false; return; }
+  const lim = CHASSIS[t.chassis].hpMax * LIMIAR_QUEBRA;
+  if(t.hp <= lim && !t.quebrado){
+    t.quebrado = true;
+    fumaça(t, 22, 1);                                   // baforada da quebra
+    sfxQuebra();
+    toast("🔧 Esteira do " + t.name + " destruída! Ele não anda mais.", 2400);
+  } else if(t.hp > lim && t.quebrado){
+    t.quebrado = false;
+    toast("🔧 Esteira do " + t.name + " consertada!", 1800);
+  }
+  if(t.quebrado && Math.random() < 0.5) fumaça(t, 1, 0.7);   // fumacinha contínua
+}
+function fumaça(t, n, forca){
+  for(let i=0;i<n;i++){
+    particles.push({ x: t.x + rand(-11, 11), y: t.y - 9 + rand(-3, 3),   // sai das esteiras
+                     vx: rand(-0.5, 0.5)*forca + wind*8, vy: -rand(0.3, 0.8)*forca - 0.25,
+                     life: rand(55, 110), r: rand(3, 6)*forca + 2,
+                     c: Math.random() < 0.55 ? "#6b6b6b" : "#8d8d8d", fumaca: true });
+  }
+}
 // suaviza só a SUBIDA (Rodões escalando paredão); queda continua quadro a quadro
 function smoothDraw(t){
   if(t.drawY === undefined || t.y > t.drawY || Math.abs(t.y - t.drawY) < 0.6) t.drawY = t.y;
@@ -566,6 +590,7 @@ function slopeAngle(x){
   return Math.atan2(groundAt(x+10)-groundAt(x-10), 20);
 }
 function tryMove(t, dir){
+  if(t.quebrado){ toast("🔧 Esteira destruída! O tanque não anda mais.", 1200); return; }
   if(t.fuel <= 0){ toast("⛽ Sem combustível!", 900); return; }
   if(t.fallFrom !== null) return;
   const ch = CHASSIS[t.chassis];
@@ -1013,6 +1038,19 @@ function sfxRepair(){
     });
   }catch(e){}
 }
+function sfxQuebra(){   // metal cedendo: estalo grave seguido de rangido
+  try{
+    const ac = audio();
+    const o = ac.createOscillator(), g = ac.createGain();
+    o.type = "sawtooth";
+    o.frequency.setValueAtTime(180, ac.currentTime);
+    o.frequency.exponentialRampToValueAtTime(55, ac.currentTime + 0.35);
+    g.gain.setValueAtTime(0.13, ac.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.001, ac.currentTime + 0.4);
+    const f = ac.createBiquadFilter(); f.type = "lowpass"; f.frequency.value = 900;
+    o.connect(f).connect(g).connect(ac.destination); o.start(); o.stop(ac.currentTime + 0.42);
+  }catch(e){}
+}
 function sfxBounce(){
   try{
     const ac = audio(), o = ac.createOscillator(), g = ac.createGain();
@@ -1075,7 +1113,7 @@ function draw(){
   }
   // partículas
   for(const pt of particles){
-    ctx.globalAlpha = clamp(pt.life/30, 0, 1);
+    ctx.globalAlpha = pt.fumaca ? clamp(pt.life/100, 0, 1)*0.6 : clamp(pt.life/30, 0, 1);
     ctx.fillStyle = pt.c;
     ctx.beginPath(); ctx.arc(pt.x, pt.y, pt.r, 0, Math.PI*2); ctx.fill();
   }
@@ -1528,10 +1566,19 @@ function drawDecor(){
     ctx.restore();
   }
 }
+function shade(hex, f){        // clareia (f>1) ou escurece (f<1) uma cor #rrggbb
+  const n = parseInt(hex.slice(1), 16);
+  const r = clamp(Math.round((n>>16)*f), 0, 255);
+  const g = clamp(Math.round(((n>>8)&255)*f), 0, 255);
+  const b = clamp(Math.round((n&255)*f), 0, 255);
+  return "#" + ((r<<16)|(g<<8)|b).toString(16).padStart(6, "0");
+}
 function drawTank(t){
   if(!t.alive){
     // destroços
     ctx.save(); ctx.translate(t.x, groundAt(t.x));
+    ctx.fillStyle = "rgba(0,0,0,.16)";
+    ctx.beginPath(); ctx.ellipse(0, 1, 22, 4.5, 0, 0, Math.PI*2); ctx.fill();
     ctx.fillStyle = "#3a3a3a";
     ctx.beginPath(); ctx.arc(0,-6,15,Math.PI,0); ctx.fill();
     ctx.fillRect(-19,-7,38,7);
@@ -1540,35 +1587,62 @@ function drawTank(t){
   }
   const rot = slopeAngle(t.x);
   const ty = t.drawY !== undefined ? t.drawY : t.y;   // subida suavizada
+  // sombra de contato com o chão
+  ctx.fillStyle = "rgba(0,0,0,.17)";
+  ctx.beginPath(); ctx.ellipse(t.x, ty + 2, 25, 4.5, 0, 0, Math.PI*2); ctx.fill();
   ctx.save();
   ctx.translate(t.x, ty);
   ctx.rotate(rot);
   // esteira (visual muda por chassi)
-  ctx.fillStyle = "#2f2f2f";
+  ctx.fillStyle = "#262626";
   rr(-25, -12, 50, 13, 6.5); ctx.fill();
-  ctx.fillStyle = "#555";
+  ctx.strokeStyle = "#151515"; ctx.lineWidth = 1.2; rr(-25,-12,50,13,6.5); ctx.stroke();
+  const corRoda = t.quebrado ? "#7a4a4a" : "#5a5a5a";
+  ctx.fillStyle = corRoda;
   if(t.chassis === "rodoes"){
     for(let i=-16;i<=16;i+=16){ ctx.beginPath(); ctx.arc(i,-6,6.3,0,Math.PI*2); ctx.fill(); }
+    ctx.fillStyle = shade(corRoda, 1.45);
+    for(let i=-16;i<=16;i+=16){ ctx.beginPath(); ctx.arc(i,-6,2.4,0,Math.PI*2); ctx.fill(); }
   } else {
-    for(let i=-18;i<=18;i+=9){ ctx.beginPath(); ctx.arc(i,-5,3.3,0,Math.PI*2); ctx.fill(); }
+    for(const i of [-19, 19]){ ctx.beginPath(); ctx.arc(i,-5.5,4.6,0,Math.PI*2); ctx.fill(); }  // motrizes
+    for(let i=-10;i<=10;i+=10){ ctx.beginPath(); ctx.arc(i,-4.5,3.1,0,Math.PI*2); ctx.fill(); }
+    ctx.fillStyle = shade(corRoda, 1.45);
+    for(const i of [-19, 19]){ ctx.beginPath(); ctx.arc(i,-5.5,1.8,0,Math.PI*2); ctx.fill(); }
   }
-  // corpo
-  ctx.fillStyle = t.color;
+  // corpo com volume
+  const gc = ctx.createLinearGradient(0, -23, 0, -9);
+  gc.addColorStop(0, shade(t.color, 1.22));
+  gc.addColorStop(0.65, t.color);
+  gc.addColorStop(1, shade(t.color, 0.82));
+  ctx.fillStyle = gc;
   rr(-21, -22, 42, 13, 6); ctx.fill();
+  ctx.strokeStyle = shade(t.color, 0.55); ctx.lineWidth = 1.3; rr(-21,-22,42,13,6); ctx.stroke();
   if(t.chassis === "blindado"){ ctx.strokeStyle = "#222"; ctx.lineWidth = 3.5; rr(-21,-22,42,13,6); ctx.stroke(); }
   if(t.chassis === "turbo"){ ctx.fillStyle = "#222"; ctx.fillRect(t.x < W/2 ? -27 : 21, -28, 6, 9); }
   ctx.restore();
   // torre + cano (sem rotação de inclinação, cano segue a mira)
   ctx.save();
   ctx.translate(t.x, ty-TURRET_H);
-  ctx.fillStyle = t.color;
+  const gt = ctx.createRadialGradient(-4, -7, 2, 0, -3, 12);
+  gt.addColorStop(0, shade(t.color, 1.3));
+  gt.addColorStop(1, shade(t.color, 0.92));
+  ctx.fillStyle = gt;
   ctx.beginPath(); ctx.arc(0, -3, 11, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = shade(t.color, 0.55); ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.arc(0, -3, 11, 0, Math.PI*2); ctx.stroke();
+  ctx.fillStyle = shade(t.color, 0.7);                    // escotilha
+  ctx.beginPath(); ctx.ellipse(-3.5, -7, 3.6, 2.4, 0, 0, Math.PI*2); ctx.fill();
   ctx.rotate(t.aim.ang);
-  ctx.fillStyle = "#333";
-  ctx.fillRect(0, -3.5, barrelLen(t), 7);
+  const bl = barrelLen(t);
+  ctx.fillStyle = "#3a3a3a";
+  ctx.fillRect(0, -3.5, bl, 7);
+  ctx.fillStyle = "#4a4a4a";
+  ctx.fillRect(0, -3.5, bl, 2.2);                         // brilho no cano
+  ctx.fillStyle = "#1b1b1b";
+  ctx.fillRect(bl - 4, -4, 4, 8);                         // boca do cano
   if(t.chassis === "sniper"){    // mira luneta na ponta
     ctx.fillStyle = "#111";
-    ctx.fillRect(barrelLen(t)-9, -7, 7, 4);
+    ctx.fillRect(bl-16, -7.5, 8, 4);
   }
   ctx.restore();
   // antena com bandeirinha
@@ -1641,7 +1715,7 @@ function drawAim(){
 // ============ LOOP ============
 function tick(){
   // física
-  for(const t of tanks){ tankPhysics(t); smoothDraw(t); }
+  for(const t of tanks){ tankPhysics(t); smoothDraw(t); checarEsteira(t); }
   const mv = movableTank();
   if(moveDir !== 0 && mv) tryMove(mv, moveDir);
   if(state === "FLY"){
@@ -1666,8 +1740,13 @@ function tick(){
   }
   for(let i=particles.length-1;i>=0;i--){
     const pt = particles[i];
-    pt.vy += G*0.6; pt.x += pt.vx; pt.y += pt.vy;
-    if(pt.y > groundAt(pt.x)) { pt.vy *= -0.3; pt.y = groundAt(pt.x); pt.vx *= 0.7; }
+    if(pt.fumaca){                       // fumaça sobe, cresce e se dissolve
+      pt.vy -= 0.014; pt.vx *= 0.985; pt.r += 0.075;
+      pt.x += pt.vx; pt.y += pt.vy;
+    } else {
+      pt.vy += G*0.6; pt.x += pt.vx; pt.y += pt.vy;
+      if(pt.y > groundAt(pt.x)) { pt.vy *= -0.3; pt.y = groundAt(pt.x); pt.vx *= 0.7; }
+    }
     if(--pt.life <= 0) particles.splice(i,1);
   }
   for(let i=floaters.length-1;i>=0;i--){
