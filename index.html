@@ -215,7 +215,7 @@ const EXTRA_MS = 5000;     // janela de fuga do Turbo depois do tiro
 const AIM_STEPS = 40;      // prévia de trajetória padrão
 
 const cv = document.getElementById("game");
-const ctx = cv.getContext("2d");
+let ctx = cv.getContext("2d");   // trocado temporariamente ao pré-renderizar o cenário
 const dpr = Math.min(window.devicePixelRatio || 1, 2);
 cv.width = W * dpr; cv.height = H * dpr;
 
@@ -245,6 +245,7 @@ let trees = [];            // árvores destrutíveis
 let decor = [];            // gramíneas, arbustos e pedras (sem colisão)
 let birds = [];            // passarinhos que fogem das árvores derrubadas
 let bg = null, bgBase = 0; // cenário distante, atrás do terreno jogável
+let bgCache = null;        // cenário é estático: desenha uma vez, depois só copia
 let sol = { x: 870, y: 70, r: 34, fase: 0 };
 // esquadrilha de 3 caças: um único sobrevoo por partida
 let squad = null, squadAt = 0, squadDone = false, squadDelay = 0, squadDir = 1, squadY = 90;
@@ -325,6 +326,7 @@ function genTerrain(){
   }
   genDecor();
   genBackdrop();
+  renderBackdropCache();
   // sobrevoo da esquadrilha: hora sorteada (mesmo momento nos 2 aparelhos)
   squadDelay = rand(10000, 70000);
   squadDir = rng() < 0.5 ? 1 : -1;
@@ -401,11 +403,13 @@ function genBackdrop(){
       x, w: rand(160, 250), h: rand(50, 92),
       skew: rand(-0.22, 0.22), ombro: rand(0.3, 0.52) }));
   } else {
-    // floresta fechada: adiciona copas até o dossel cobrir a faixa alvo do horizonte
-    const alvo = rand(0.62, 0.82);
+    // mata fechada: planta até o dossel cobrir quase toda a linha do horizonte
+    const alvo = rand(0.95, 1.0);
     let guard = 0;
-    while(coberturaDossel(bg.itens) < alvo && guard++ < 400)
+    while(coberturaDossel(bg.itens) < alvo && guard++ < 1500)
       bg.itens.push(arvoreFloresta(rand(-25, W+25)));
+    const extra = Math.round(bg.itens.length * rand(0.35, 0.6));   // adensa o miolo
+    for(let i=0;i<extra;i++) bg.itens.push(arvoreFloresta(rand(-25, W+25)));
     bg.cobertura = coberturaDossel(bg.itens);
     bg.itens.sort((a,b) => a.camada - b.camada || a.x - b.x);   // fundo antes da frente
     return;
@@ -427,17 +431,18 @@ function coberturaDossel(itens){
   return clamp(total, 0, W) / W;
 }
 function arvoreFloresta(x){
-  const camada = rng() < 0.45 ? 0 : 1;            // 0 = mata ao fundo, 1 = primeira fila
-  const r = camada === 0 ? rand(30, 50) : rand(24, 40);
-  const emerg = rng() < 0.18;                     // emergente: espia por cima do dossel
-  const alt = (camada === 0 ? rand(74, 116) : rand(44, 84)) * (emerg ? 1.45 : 1);
-  const lobos = [{ dx:0, dy:0, r: r*0.86 }];
-  const n = 4 + Math.floor(rand(0, 3));
+  const camada = Math.floor(rand(0, 3));          // 0 mata ao fundo, 1 meio, 2 primeira fila
+  const r = camada === 0 ? rand(12, 19) : camada === 1 ? rand(11, 17) : rand(10, 15);
+  const emerg = rng() < 0.09;                     // emergente: espia por cima do dossel
+  const base = camada === 0 ? rand(38, 58) : camada === 1 ? rand(27, 44) : rand(18, 33);
+  const alt = base * (emerg ? 1.55 : 1);
+  const lobos = [{ dx:0, dy:0, r: r*0.9 }];
+  const n = 3 + Math.floor(rand(0, 3));
   for(let i=0;i<n;i++){
-    const a = rand(0, Math.PI*2), d = rand(r*0.34, r*0.72);
-    lobos.push({ dx: Math.cos(a)*d, dy: Math.sin(a)*d*0.55, r: r*rand(0.44, 0.72) });
+    const a = rand(0, Math.PI*2), d = rand(r*0.32, r*0.68);
+    lobos.push({ dx: Math.cos(a)*d, dy: Math.sin(a)*d*0.55, r: r*rand(0.46, 0.74) });
   }
-  return { x, r, camada, alt, emerg, lobos, lean: rand(-5, 5), tom: rand(-7, 7) };
+  return { x, r, camada, alt, emerg, lobos, lean: rand(-3, 3) };
 }
 // cume irregular em facetas retas, em vez de triângulo perfeito
 function perfilMontanha(){
@@ -992,7 +997,7 @@ function draw(){
   drawSol();
   drawNuvens();
   drawSquad();
-  drawBackdrop();
+  if(bgCache) ctx.drawImage(bgCache, 0, 0, W, H); else drawBackdrop();
   // terreno
   const dirt = ctx.createLinearGradient(0, H*0.3, 0, H);
   dirt.addColorStop(0,"#8a6238"); dirt.addColorStop(1,"#5b3d22");
@@ -1096,7 +1101,7 @@ const BG_CHAO = { topo:"#b3c8cd", base:"#9db6a3" };
 const BG_CORES = {   // tons lavados: sugerem distância atmosférica
   montanha: { corpo:"#93a7bd", luz:"#a8bbcd" },
   montes:   { corpo:"#8fae95", luz:"#a0bda5" },
-  floresta: { corpo:"#6f9a7a", luz:"#89b291", fundo:"#93b79b", tronco:"#7f8f83" }
+  floresta: { camadas:["#9cbea4","#86ad8f","#6f9a7a"], luz:"#a8c9ad", tronco:"#7c8b80" }
 };
 function bgY(x){   // altura do horizonte distante em x
   const i = clamp(Math.round(x/8), 0, bg.perfil.length-1);
@@ -1177,6 +1182,20 @@ function drawMonte(m, c){
   ctx.lineTo(cx + m.w*0.05, topo + m.h*0.22);
   ctx.closePath(); ctx.fill();
 }
+// o cenário nunca muda durante a partida: renderiza uma vez em 2x e depois só copia
+function renderBackdropCache(){
+  if(!bg) return;
+  if(!bgCache){
+    bgCache = document.createElement("canvas");
+    bgCache.width = W*2; bgCache.height = H*2;
+  }
+  const octx = bgCache.getContext("2d");
+  octx.setTransform(2, 0, 0, 2, 0, 0);
+  octx.clearRect(0, 0, W, H);
+  const real = ctx;
+  ctx = octx;
+  try { drawBackdrop(); } finally { ctx = real; }
+}
 function drawBackdrop(){
   if(!bg) return;
   const c = BG_CORES[bg.tipo];
@@ -1198,18 +1217,19 @@ function drawBackdrop(){
   if(bg.tipo === "floresta"){
     for(const a of bg.itens){
       const base = bgY(a.x) + 4, topo = base - a.alt;
-      if(a.camada === 1 || a.emerg){                 // tronco aparece nas da frente
+      if(a.camada === 2 || a.emerg){                 // tronco só aparece na fila da frente
         ctx.strokeStyle = c.tronco;
-        ctx.lineWidth = Math.max(2.5, a.r*0.13); ctx.lineCap = "round";
+        ctx.lineWidth = Math.max(2, a.r*0.16); ctx.lineCap = "round";
         ctx.beginPath();
-        ctx.moveTo(a.x, base); ctx.lineTo(a.x + a.lean, topo + a.r*0.45);
+        ctx.moveTo(a.x, base); ctx.lineTo(a.x + a.lean, topo + a.r*0.5);
         ctx.stroke();
       }
-      const cor = a.camada === 0 ? c.fundo : c.corpo;
-      ctx.fillStyle = cor;
+      ctx.fillStyle = c.camadas[a.camada];
       for(const l of a.lobos) blob(a.x + l.dx, topo + l.dy, l.r);
-      ctx.fillStyle = a.camada === 0 ? "rgba(255,255,255,.16)" : c.luz;
-      blob(a.x - a.r*0.26, topo - a.r*0.3, a.r*0.42);   // luz batendo no dossel
+      if(a.camada === 2){                            // luz batendo no alto do dossel
+        ctx.fillStyle = c.luz;
+        blob(a.x - a.r*0.28, topo - a.r*0.34, a.r*0.4);
+      }
     }
   }
   ctx.restore();
